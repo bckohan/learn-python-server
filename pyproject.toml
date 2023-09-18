@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "learn-python-server"
+version = "0.1.0"
+description = "Server tools for running a learn-python class."
+authors = ["Brian Kohan <bckohan@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{include = "learn_python_server"}]
+classifiers = [
+    "Environment :: Console",
+    "Framework :: Django",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django :: 4.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+django = "^4.2.5"
+psycopg = "^3.1.10"
+django-enum = "^1.2.1"
+enum-properties = "^1.6.0"
+django-polymorphic = "^3.1.0"
+django-split-settings = "^1.2.0"
+poetry = "^1.6.1"
+
+[tool.poetry.group.dev.dependencies]
+ipython = "^8.13.2"
+ipdb = "^0.13.13"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
