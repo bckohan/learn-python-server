@@ -1,8 +1,10 @@
+from collections.abc import MutableMapping
 from typing import Any
 from django.db import models
 from django.conf import settings
 from django_enum import EnumField
 from enum_properties import EnumProperties, p, s
+from django_enum import TextChoices
 from django.utils.translation import gettext_lazy as _
 from polymorphic.models import PolymorphicModel
 from learn_python_server.utils import normalize_url
@@ -12,18 +14,31 @@ import os
 from pathlib import Path
 import re
 import json
+from django.utils.timezone import now
+from django.utils.functional import cached_property
 
 
-class TutorBackend(EnumProperties, p('uri')):
+class TutorBackend(TextChoices, p('uri')):
 
     OPEN_AI = 'openai', 'https://platform.openai.com/'
 
+    def __str__(self):
+        return self.value
 
-class TutorRole(EnumProperties, s('alt')):
+
+class TutorRole(TextChoices, s('alt')):
     
     SYSTEM = 'system', ['system']
     TUTOR = 'tutor', ['assistant']
     STUDENT = 'student', ['user']
+
+
+def datetime_now():
+    return now()
+
+
+def date_now():
+    return now().date()
 
 
 def repo_guard(func):
@@ -76,6 +91,7 @@ class Repository(models.Model):
     """
 
     BRANCH_RE = re.compile(r'tree/(?P<branch>.*)$')
+    URI_RE = re.compile('https://github.com/(?P<handle>[^/]+)/(?P<repo>[^/]+)(?:/tree/(?P<branch>.*))?$')
 
     uri = models.URLField(
         max_length=255,
@@ -83,8 +99,6 @@ class Repository(models.Model):
         unique=True,
         help_text=_('The Git repository URI. This may be a specific branch (i.e. tree/branch_name)')
     )
-
-    branch = models.CharField(max_length=64, null=True)
 
     # repo execution context cache
     _cwd = None
@@ -96,20 +110,29 @@ class Repository(models.Model):
     def root(self):
         """Get's the root repository without any branches"""
         return self.BRANCH_RE.sub('', self.uri).rstrip('/')
+    
+    @cached_property
+    def branch(self):
+        """Get's the branch name from the uri"""
+        return self.BRANCH_RE.search(self.uri).groupdict()['branch']
+    
+    @cached_property
+    def handle(self):
+        """Get's the user handle name from the uri"""
+        return self.URI_RE.search(self.uri).groupdict()['handle']
 
+    @cached_property
+    def name(self):
+        """Get's the repo name from the uri"""
+        return self.URI_RE.search(self.uri).groupdict()['repo']
+    
     def clean(self):
         super().clean()
         self.uri = normalize_url(self.uri)
-        branch_match = self.BRANCH_RE.search(self.uri)
-        if branch_match:
-            if self.branch and self.branch != branch_match.groupdict()['branch']:
-                raise ValidationError({
-                    'branch': (
-                        _('Branch value (%s) does not match uri branch: %s') % 
-                        (self.branch, branch_match.groupdict()['branch'])
-                    )
-                })
-            self.branch = branch_match.groupdict()['branch']
+        if not self.URI_RE.match(self.uri):
+            raise ValidationError({
+                'uri': _('Invalid repository URI. Only github supported currently.')
+            })
 
     _clone = None
 
@@ -125,8 +148,11 @@ class Repository(models.Model):
         :return: The path to the cloned repository.
         :raises: subprocess.CalledProcessError if the Git command fails.
         """
-        subprocess.check_call(['git', 'clone', self.uri, path])
+        subprocess.check_call(['git', 'clone', self.root, path])
         self._clone = Path(path)
+        if self.branch:
+            # todo checkout branch
+            subprocess.check_call(['git', 'checkout', self.branch])
         return self
     
     def commit_count(self):
@@ -224,10 +250,10 @@ class RepositoryVersion(models.Model):
     git_hash = models.CharField(max_length=255, null=False)
     git_branch = models.CharField(max_length=255, null=False, default='main')
     commit_count = models.PositiveIntegerField(null=False, default=0, db_index=True)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    timestamp = models.DateTimeField(default=datetime_now, db_index=True)
 
     def __str__(self):
-        return f'[{self.git_branch}] ({self.timestamp}) {self.git_hash}'
+        return f'[{self.git_branch}] ({self.timestamp.date()}) {self.git_hash[:10]}'
 
     class Meta:
         abstract = True
@@ -237,40 +263,73 @@ class RepositoryVersion(models.Model):
 
 class TutorAPIKey(models.Model):
 
+    name = models.CharField(max_length=64, null=False, unique=True)
     backend = EnumField(TutorBackend)
     secret = models.CharField(max_length=255)
 
+    def __str__(self):
+        return f'[{self.backend.value}] {self.name}'
+
+    class Meta:
+        verbose_name = _('Tutor API Key')
+        verbose_name_plural = _('Tutor API Keys')
+
 
 class CourseRepository(Repository):
-    pass
+    
+    class Meta:
+        verbose_name = _('Course Repository')
+        verbose_name_plural = _('Course Repositories')
 
 
 class CourseRepositoryVersion(RepositoryVersion):
 
-    repository = models.ForeignKey('CourseRepository', on_delete=models.CASCADE)
+    repository = models.ForeignKey(CourseRepository, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f'{self.repository}: {RepositoryVersion.__str__(self)}'
+    
+    class Meta:
+        verbose_name = _('Course Repository Version')
+        verbose_name_plural = _('Course Repository Versions')
 
 
 class DocBuild(models.Model):
 
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    repository = models.ForeignKey('CourseRepositoryVersion', on_delete=models.PROTECT)
+    timestamp = models.DateTimeField(default=datetime_now, db_index=True)
+    repository = models.ForeignKey(CourseRepositoryVersion, on_delete=models.PROTECT)
+
+    @property
+    def sub_dir(self):
+        return f'docs/{self.id}'
 
     @property
     def path(self):
-        return Path(settings.STATIC_ROOT) / 'docs' / str(self.id)
+        return Path(settings.STATIC_ROOT) / self.sub_dir
+    
+    @property
+    def url(self):
+        root = str(Path(settings.STATIC_URL) / self.sub_dir)
+        if settings.DEBUG:
+            return f'{root}/index.html'
+        return root
 
     def __str__(self):
         return f'[{self.repository}] {self.path}'
+
+    class Meta:
+        verbose_name = _('Doc Build')
+        verbose_name_plural = _('Doc Builds')
+
 
 class Course(models.Model):
 
     name = models.CharField(max_length=255, unique=True, db_index=True)
     description = models.TextField(null=False, default='', blank=True)
-    started = models.DateTimeField(auto_now_add=True)
-    ended = models.DateTimeField(null=True, blank=True, default=None)
+    started = models.DateField(default=date_now, editable=True)
+    ended = models.DateField(null=True, blank=True, default=None)
 
     repository = models.ForeignKey(CourseRepository, on_delete=models.PROTECT, related_name='courses')
-    docs = models.ForeignKey(DocBuild, on_delete=models.SET_NULL, null=True, blank=True)
 
     students = models.ManyToManyField('Student', related_name='courses', through='Enrollment')
 
@@ -282,40 +341,91 @@ class Course(models.Model):
         help_text=_('API key for the Tutor backend, specifically for this course.')
     )
 
+    @property
+    def docs(self):
+        return DocBuild.objects.filter(repository__repository=self.repository).latest('timestamp')
+
     def __str__(self):
-        return f'[{self.id}] {self.name}: {self.repository.uri}'
+        return f'[ {self.name} ]: {self.repository.uri}'
     
     class Meta:
         ordering = ['-started']
+        verbose_name = _('Course')
+        verbose_name_plural = _('Courses')
 
 
 class Enrollment(models.Model):
 
-    student = models.ForeignKey('Student', on_delete=models.CASCADE)
-    course = models.ForeignKey('Course', on_delete=models.CASCADE)
+    student = models.ForeignKey('Student', on_delete=models.CASCADE, related_name='enrollments')
+    course = models.ForeignKey('Course', on_delete=models.CASCADE, related_name='enrollments')
     repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE, null=True, blank=True)
-    joined = models.DateTimeField(auto_now_add=True)
-    last_activity = models.DateTimeField(null=True, blank=True, editable=False)
+    joined = models.DateTimeField(default=datetime_now)
+    last_activity = models.DateTimeField(null=True, blank=True)
+
+
+    def clean(self):
+        super().clean()
+        if self.repository and self.repository.student != self.student:
+            raise ValidationError({
+                'repository': _('Repository does not belong to student.')
+            })
 
     class Meta:
         unique_together = [('student', 'repository'), ('student', 'course')]
+        verbose_name = _('Enrollment')
+        verbose_name_plural = _('Enrollments')
 
 
 class StudentRepository(Repository):
-    student = models.ForeignKey('Student', on_delete=models.CASCADE, related_name='repositories')
+
+    student = models.ForeignKey(
+        'Student',
+        on_delete=models.CASCADE,
+        related_name='repositories',
+        blank=True
+    )
+
+    def clean(self):
+        super().clean()
+        if not hasattr(self, 'student'):
+            uri_match = Repository.URI_RE.search(self.uri)
+            if uri_match:
+                self.student = Student.objects.get_or_create(
+                    handle=uri_match.groupdict()['handle']
+                )[0]
+        if self.student and self.student.handle != self.handle:
+            raise ValidationError({
+                'handle': _('Handle {} does not belong to student {}.').format(self.handle, self.student.display)
+            })
+
+    class Meta:
+        verbose_name = _('Student Repository')
+        verbose_name_plural = _('Student Repositories')
 
 
 class StudentRepositoryVersion(RepositoryVersion):
 
     repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE)
 
+    def __str__(self):
+        return f'{self.repository}: {RepositoryVersion.__str__(self)}'
+    
+    class Meta:
+        verbose_name = _('Student Repository Version')
+        verbose_name_plural = _('Student Repository Versions')
+
 
 class Student(models.Model):
 
-    name = models.CharField(max_length=255, null=True)
-    email = models.EmailField(null=True)
-    github = models.CharField(max_length=255, null=False, unique=True)
-    joined = models.DateTimeField(auto_now_add=True)
+    name = models.CharField(max_length=255, null=True, blank=True)
+    email = models.EmailField(null=True, blank=True)
+    handle = models.CharField(
+        max_length=255,
+        null=False,
+        unique=True,
+        help_text=_('The student\'s GitHub handle.')
+    )
+    joined = models.DateTimeField(default=datetime_now)
 
     tutor_key = models.ForeignKey(
         'TutorAPIKey',
@@ -329,14 +439,21 @@ class Student(models.Model):
     )
 
     @property
-    def name(self):
-        return self.name or self.github
+    def display(self):
+        return self.name or self.handle
+    
+    def __str__(self):
+        return self.display
+
+    class Meta:
+        verbose_name = _('Student')
+        verbose_name_plural = _('Students')
 
 
 class TutorExchange(models.Model):
 
     role = EnumField(TutorRole)
-    message = models.TextField(null=False, editable=False)
+    message = models.TextField(null=False)
     timestamp = models.DateTimeField(null=False, db_index=True)
 
     session = models.ForeignKey('TutorSession', on_delete=models.CASCADE)
@@ -345,6 +462,8 @@ class TutorExchange(models.Model):
 
     class Meta:
         ordering = ['timestamp']
+        verbose_name = _('Tutor Exchange')
+        verbose_name_plural = _('Tutor Exchanges')
 
 
 class TutorSession(models.Model):
@@ -365,6 +484,8 @@ class TutorSession(models.Model):
     class Meta:
         ordering = ['start']
         unique_together = [('engagement', 'session_id')]
+        verbose_name = _('Tutor Session')
+        verbose_name_plural = _('Tutor Sessions')
 
 
 class TutorEngagement(models.Model):
@@ -382,6 +503,8 @@ class TutorEngagement(models.Model):
 
     class Meta:
         ordering = ['-start']
+        verbose_name = _('Tutor Engagement')
+        verbose_name_plural = _('Tutor Engagements')
 
 
 class Module(PolymorphicModel):
@@ -413,11 +536,17 @@ class Module(PolymorphicModel):
     class Meta:
         ordering = ['number']
         unique_together = [('repository', 'number')]
+        verbose_name = _('Module')
+        verbose_name_plural = _('Modules')
 
 
 class SpecialTopic(Module):
 
     uri = models.URLField(max_length=255, null=False)
+
+    class Meta:
+        verbose_name = _('Special Topic')
+        verbose_name_plural = _('Special Topics')
 
 
 class Assignment(models.Model):
@@ -455,3 +584,5 @@ class Assignment(models.Model):
     class Meta:
         ordering = ['number']
         unique_together = [('module', 'name')]
+        verbose_name = _('Assignment')
+        verbose_name_plural = _('Assignments')

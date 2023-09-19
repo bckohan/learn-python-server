@@ -16,9 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from django.conf import settings
+from django.conf.urls.static import static
+from learn_python_server.views import redirect_latest_docs
+from django.contrib.staticfiles import handlers
 
 
 urlpatterns = [
-    #path('', ControlView.as_view(), name='control'),
+    path('', redirect_latest_docs, name='redirect_latest_docs'),
     path('admin/', admin.site.urls),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

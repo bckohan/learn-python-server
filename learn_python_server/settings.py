@@ -175,3 +175,11 @@ DEFAULT_COURSE_REPOSITORY = 'https://github.com/bckohan/learn-python'
 # TMP_DIR = BASE_DIR / 'tmp'
 
 include(optional('local.py'))
+
+
+if DEBUG:
+    STATICFILES_FINDERS = [
+        'django.contrib.staticfiles.finders.FileSystemFinder',
+        'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+        'learn_python_server.finders.DocBuildFinder',
+    ]
