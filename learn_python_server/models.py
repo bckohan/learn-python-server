@@ -16,6 +16,8 @@ import re
 import json
 from django.utils.timezone import now
 from django.utils.functional import cached_property
+import tempfile
+from cryptography.hazmat.primitives import serialization as crypto_serialization
 
 
 class TutorBackend(TextChoices, p('uri')):
@@ -90,7 +92,7 @@ class Repository(models.Model):
     Only tested on github right now but should probably also support gitlab.
     """
 
-    BRANCH_RE = re.compile(r'tree/(?P<branch>.*)$')
+    BRANCH_RE = re.compile(r'(?:tree/(?P<branch>.*))?$')
     URI_RE = re.compile('https://github.com/(?P<handle>[^/]+)/(?P<repo>[^/]+)(?:/tree/(?P<branch>.*))?$')
 
     uri = models.URLField(
@@ -114,7 +116,7 @@ class Repository(models.Model):
     @cached_property
     def branch(self):
         """Get's the branch name from the uri"""
-        return self.BRANCH_RE.search(self.uri).groupdict()['branch']
+        self.BRANCH_RE.search(self.uri).groupdict()['branch']
     
     @cached_property
     def handle(self):
@@ -397,10 +399,112 @@ class StudentRepository(Repository):
             raise ValidationError({
                 'handle': _('Handle {} does not belong to student {}.').format(self.handle, self.student.display)
             })
+    
+    def synchronize_keys(self):
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+
+        def get_keys():
+            with open(self.local / 'public_keys.pem', 'rb') as f:
+                pem_data = f.read().decode()
+            
+            # Splitting the keys based on PEM headers/footers
+            pem_keys = [
+                f"-----BEGIN {m[1]}-----{m[2]}-----END {m[1]}-----"
+                for m in re.findall(
+                    r"(-----BEGIN (.*?)-----)(.*?)(-----END \2-----)",
+                    pem_data,
+                    re.S
+                )
+            ]
+
+            return [
+                serialization.load_pem_public_key(
+                    pem.encode(),
+                    backend=default_backend()
+                ) for pem in pem_keys
+            ]
+
+
+        if self.local:
+            keys = self.get_keys()
+        else:
+            tmp_root = getattr(settings, 'TMP_DIR', None)
+            if tmp_root:
+                os.makedirs(tmp_root, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=tmp_root) as tmpdir:
+                tmpdir = Path(tmpdir)
+                self.clone(tmpdir) 
+                keys = self.get_keys()
+
+        all_keys = set()
+        new_keys = set()
+        for key in keys:
+            key, created = StudentRepositoryPublicKey.objects.get_or_create(
+                repository=self,
+                key=key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+            )
+            if created:
+                new_keys.add(key)
+            all_keys.add(key)
+        
+        # remove old keys
+        removed = StudentRepositoryPublicKey.objects.filter(repository=self).exclude(all_keys)
+        removed.delete()
+        return all_keys, new_keys, set(removed)
+
+    def verify(self, message, signature):
+        return any((key.verify(message, signature) for key in self.keys.all()))
 
     class Meta:
         verbose_name = _('Student Repository')
         verbose_name_plural = _('Student Repositories')
+
+
+class StudentRepositoryPublicKey(models.Model):
+
+    repository = models.ForeignKey(
+        'StudentRepository',
+        on_delete=models.CASCADE,
+        related_name='keys'
+    )
+    key = models.BinaryField()
+    timestamp = models.DateTimeField(default=datetime_now, db_index=True)
+
+    def verify(self, message, signature):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.backends import default_backend
+
+        try:
+            # load public key from binary field
+            public_key = crypto_serialization.load_pem_public_key(
+                self.key,
+                backend=default_backend()
+            )
+            public_key.verify(
+                signature,
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except:
+            return False
+
+    def __str__(self):
+        return f'{self.repository}: {self.timestamp}'
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = _('Student Repository Public Key')
+        verbose_name_plural = _('Student Repository Public Keys')
 
 
 class StudentRepositoryVersion(RepositoryVersion):

@@ -36,6 +36,9 @@ enum-properties = "^1.6.0"
 django-polymorphic = "^3.1.0"
 django-split-settings = "^1.2.0"
 poetry = "^1.6.1"
+cryptography = "^41.0.3"
+markdown = "^3.4.4"
+djangorestframework = "^3.14.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "^8.13.2"
