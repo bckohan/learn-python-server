@@ -40,7 +40,7 @@
 
             // Perform the AJAX request
             $.ajax({
-                url: '{% url opts|admin_urlname:'build-docs' original.pk|admin_urlquote %}',
+                url: '{% url opts|admin_urlname:"build-docs" original.pk|admin_urlquote %}',
                 type: 'GET',
                 success: function (data) {
                     // Handle success
