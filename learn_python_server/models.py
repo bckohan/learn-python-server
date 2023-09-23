@@ -1,13 +1,14 @@
 from collections.abc import MutableMapping
 from typing import Any
 from django.db import models
+from django.apps import apps
 from django.conf import settings
 from django_enum import EnumField
-from enum_properties import EnumProperties, p, s
-from django_enum import TextChoices
+from enum_properties import p, s
+from django_enum import TextChoices, IntegerChoices
 from django.utils.translation import gettext_lazy as _
 from polymorphic.models import PolymorphicModel
-from learn_python_server.utils import normalize_url
+from learn_python_server.utils import normalize_url, TemporaryDirectory
 from django.core.exceptions import ValidationError, SuspiciousOperation
 import subprocess
 import os
@@ -16,8 +17,67 @@ import re
 import json
 from django.utils.timezone import now
 from django.utils.functional import cached_property
-import tempfile
-from cryptography.hazmat.primitives import serialization as crypto_serialization
+from cryptography.hazmat.primitives import (
+    hashes,
+    serialization as crypto_serialization
+)
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
+from django.contrib.auth.models import AbstractUser, UserManager, PermissionsMixin
+from polymorphic.models import PolymorphicModel, PolymorphicManager
+import base64
+import time
+
+
+class Domain(IntegerChoices, s('url')):
+
+    GITHUB = 0, 'github', 'https://github.com'
+    #GITLAB = 1, 'gitlab', 'https://gitlab.com'
+
+
+class PolymorphicUserManager(PolymorphicManager, UserManager):
+    pass
+
+
+class User(PolymorphicModel, AbstractUser, PermissionsMixin):
+    """
+    Adapt abstract django user to our purposes. first_name and last_name are not
+    culturally universal so we smash them into a single full_name field. We also
+    do not require an email address.
+    """
+
+    objects = PolymorphicUserManager()
+
+    @property
+    def first_name(self):
+        if self.full_name:
+            return self.full_name.split()[0]
+        return ''
+    
+    @property
+    def last_name(self):
+        names = self.full_name.split()
+        if len(names) > 1:
+            return names[-1]
+        return ''
+    
+    full_name = models.CharField(_("full name"), max_length=255, blank=True, default='')
+    email = models.EmailField(_("email address"), blank=True, null=True)
+
+    EMAIL_FIELD = 'email'
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = []
+
+    def get_full_name(self):
+        return self.full_name.strip()
+
+    def get_short_name(self):
+        return self.first_name
+
+    def email_user(self, subject, message, from_email=None, **kwargs):
+        if self.email:
+            super().send_mail(subject, message, from_email, [self.email], **kwargs)
 
 
 class TutorBackend(TextChoices, p('uri')):
@@ -47,6 +107,16 @@ def repo_guard(func):
     """
     Make sure any repository functions are called within the context of the repository and
     do not pollute the server's runtime environment.
+
+    .. warning::
+
+        Executing code from the wild on a server is extremely dangerous! In the future
+        we should run this code in some sort of sandboxed environment like a highly
+        secure container or VM. For now it is critical that if you're running a 
+        learn-python-server that you have 100% confidence you know that the code in 
+        the course repository is safe. NEVER run student code on the server without
+        further safety precautions and at minimum isolating it's runtime from the network
+        and host kernel.
     """
     def wrapper(self, *args, **kwargs):
 
@@ -93,7 +163,11 @@ class Repository(models.Model):
     """
 
     BRANCH_RE = re.compile(r'(?:tree/(?P<branch>.*))?$')
-    URI_RE = re.compile('https://github.com/(?P<handle>[^/]+)/(?P<repo>[^/]+)(?:/tree/(?P<branch>.*))?$')
+    URI_RE = re.compile('https://(?P<domain>github).com/(?P<handle>[^/]+)/(?P<repo>[^/]+)(?:/tree/(?P<branch>.*))?$')
+
+    @staticmethod
+    def is_valid(uri):
+        return Repository.URI_RE.match(uri)
 
     uri = models.URLField(
         max_length=255,
@@ -107,6 +181,16 @@ class Repository(models.Model):
     _venv = None
     _in_context = False
     _virtualenvs_in_project = None
+
+    def path(self, stem):
+        """
+        Get a path relative to the repository root.
+        
+        :param args: The path segments to join.
+        :return: The joined path.
+        """
+        assert self.local, 'Repository has not been cloned.'
+        return self.local / Path(stem)
 
     @property
     def root(self):
@@ -184,6 +268,9 @@ class Repository(models.Model):
         ).strip().decode('utf-8')
 
     def __enter__(self):
+        if not self.local:
+            self._tmp_dir = TemporaryDirectory()
+            self.clone(self._tmp_dir.__enter__())
         self._cwd = os.getcwd()
         os.chdir(self.local)
         self._venv = os.environ.pop('VIRTUAL_ENV', None)
@@ -206,6 +293,9 @@ class Repository(models.Model):
         if self._venv:
             os.environ['VIRTUAL_ENV'] = self._venv
         self._in_context = False
+        if hasattr(self, '_tmp_dir'):
+            self._tmp_dir.__exit__(exc_type, exc_val, exc_tb)
+            del self._tmp_dir
 
     @repo_guard
     def venv(self):
@@ -286,7 +376,11 @@ class CourseRepository(Repository):
 
 class CourseRepositoryVersion(RepositoryVersion):
 
-    repository = models.ForeignKey(CourseRepository, on_delete=models.CASCADE)
+    repository = models.ForeignKey(
+        CourseRepository,
+        on_delete=models.CASCADE,
+        related_name='versions'
+    )
 
     def __str__(self):
         return f'{self.repository}: {RepositoryVersion.__str__(self)}'
@@ -360,7 +454,13 @@ class Enrollment(models.Model):
 
     student = models.ForeignKey('Student', on_delete=models.CASCADE, related_name='enrollments')
     course = models.ForeignKey('Course', on_delete=models.CASCADE, related_name='enrollments')
-    repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE, null=True, blank=True)
+    repository = models.OneToOneField(
+        'StudentRepository',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='enrollment'
+    )
     joined = models.DateTimeField(default=datetime_now)
     last_activity = models.DateTimeField(null=True, blank=True)
 
@@ -378,6 +478,29 @@ class Enrollment(models.Model):
         verbose_name_plural = _('Enrollments')
 
 
+class StudentRepositoryManager(models.Manager):
+
+    @staticmethod
+    def student_from_uri(uri):
+        uri_match = Repository.is_valid(uri)
+        if uri_match:
+            return Student.objects.get_or_create(
+                domain=uri_match.groupdict()['domain'],
+                handle=uri_match.groupdict()['handle']
+            )[0]
+        return None
+
+    def get_or_create(self, **kwargs):
+        if 'student' not in kwargs:
+            kwargs['student'] = self.student_from_uri(kwargs.get('uri', None))
+        return super().get_or_create(**kwargs)
+
+    def create(self, **kwargs):
+        if 'student' not in kwargs:
+            kwargs['student'] = self.student_from_uri(kwargs.get('uri', None))
+        return super().create(**kwargs)
+
+
 class StudentRepository(Repository):
 
     student = models.ForeignKey(
@@ -387,55 +510,41 @@ class StudentRepository(Repository):
         blank=True
     )
 
+    objects = StudentRepositoryManager()
+
     def clean(self):
         super().clean()
-        if not hasattr(self, 'student'):
-            uri_match = Repository.URI_RE.search(self.uri)
-            if uri_match:
-                self.student = Student.objects.get_or_create(
-                    handle=uri_match.groupdict()['handle']
-                )[0]
+        if not hasattr(self, 'student') or self.student is None:
+            self.student = StudentRepositoryManager.student_from_uri(self.uri)
         if self.student and self.student.handle != self.handle:
             raise ValidationError({
                 'handle': _('Handle {} does not belong to student {}.').format(self.handle, self.student.display)
             })
     
     def synchronize_keys(self):
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives import serialization
+        keys = []
+        with self:
+            key_file = self.path('public_keys.pem')
+            if key_file.is_file():
+                with open(key_file, 'rb') as f:
+                    pem_data = f.read().decode()
+                
+                # Splitting the keys based on PEM headers/footers
+                pem_keys = [
+                    f"-----BEGIN {m[1]}-----{m[2]}-----END {m[1]}-----"
+                    for m in re.findall(
+                        r"(-----BEGIN (.*?)-----)(.*?)(-----END \2-----)",
+                        pem_data,
+                        re.S
+                    )
+                ]
 
-        def get_keys():
-            with open(self.local / 'public_keys.pem', 'rb') as f:
-                pem_data = f.read().decode()
-            
-            # Splitting the keys based on PEM headers/footers
-            pem_keys = [
-                f"-----BEGIN {m[1]}-----{m[2]}-----END {m[1]}-----"
-                for m in re.findall(
-                    r"(-----BEGIN (.*?)-----)(.*?)(-----END \2-----)",
-                    pem_data,
-                    re.S
-                )
-            ]
-
-            return [
-                serialization.load_pem_public_key(
-                    pem.encode(),
-                    backend=default_backend()
-                ) for pem in pem_keys
-            ]
-
-
-        if self.local:
-            keys = self.get_keys()
-        else:
-            tmp_root = getattr(settings, 'TMP_DIR', None)
-            if tmp_root:
-                os.makedirs(tmp_root, exist_ok=True)
-            with tempfile.TemporaryDirectory(dir=tmp_root) as tmpdir:
-                tmpdir = Path(tmpdir)
-                self.clone(tmpdir) 
-                keys = self.get_keys()
+                keys = [
+                    crypto_serialization.load_pem_public_key(
+                        pem.encode(),
+                        backend=default_backend()
+                    ) for pem in pem_keys
+                ]
 
         all_keys = set()
         new_keys = set()
@@ -443,8 +552,8 @@ class StudentRepository(Repository):
             key, created = StudentRepositoryPublicKey.objects.get_or_create(
                 repository=self,
                 key=key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    encoding=crypto_serialization.Encoding.PEM,
+                    format=crypto_serialization.PublicFormat.SubjectPublicKeyInfo
                 )
             )
             if created:
@@ -452,13 +561,38 @@ class StudentRepository(Repository):
             all_keys.add(key)
         
         # remove old keys
-        removed = StudentRepositoryPublicKey.objects.filter(repository=self).exclude(all_keys)
+        removed = StudentRepositoryPublicKey.objects.filter(
+            repository=self
+        ).exclude(pk__in=[key.pk for key in all_keys])
         removed.delete()
         return all_keys, new_keys, set(removed)
 
-    def verify(self, message, signature):
-        return any((key.verify(message, signature) for key in self.keys.all()))
+    def verify(self, request):
+        """
+        Verify that the request has been signed by a clone of this student's repository.
+        We use a timestamp signing scheme to prevent replay attacks.
+        """
+        timestamp = request.META.get('HTTP_X_LEARN_PYTHON_TIMESTAMP', None)
+        signature = request.META.get('HTTP_X_LEARN_PYTHON_SIGNATURE', None)
+        if timestamp and signature:
+            try:
+                timestamp = int(timestamp)
+            except (TypeError, ValueError):
+                return False
+            if abs(int(time.time()) - timestamp) > settings.LP_REQUEST_TIMEOUT:
+                return False
+            return any((key.verify(str(timestamp), signature) for key in self.keys.all()))
+        return False
 
+    def get_tutor_key(self):
+        """Get the tutor backend and api key this repository should use, if any."""
+        tutor_api_key = None
+        if hasattr(self, 'enrollment') and self.enrollment:
+            tutor_api_key = self.enrollment.course.tutor_key
+        if self.student.tutor_key:
+            tutor_api_key = self.student.tutor_key
+        return tutor_api_key
+    
     class Meta:
         verbose_name = _('Student Repository')
         verbose_name_plural = _('Student Repositories')
@@ -474,19 +608,33 @@ class StudentRepositoryPublicKey(models.Model):
     key = models.BinaryField()
     timestamp = models.DateTimeField(default=datetime_now, db_index=True)
 
-    def verify(self, message, signature):
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.asymmetric import padding
-        from cryptography.hazmat.backends import default_backend
+    @cached_property
+    def key_str(self):
+        return crypto_serialization.load_pem_public_key(
+            self.key,
+            backend=default_backend()
+        ).public_bytes(
+            encoding=crypto_serialization.Encoding.PEM,
+            format=crypto_serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
 
+    def verify(self, message: str, signature: str) -> bool:
+        """
+        Verify that the given message has been signed by the corresponding private key.
+        
+        :param message: The str message to verify
+        :param signature: The base64 encoded signature
+        :return: True if the message was signed by the private key corresponding
+            to this public key.
+        """
+        # load public key from binary field
+        public_key = crypto_serialization.load_pem_public_key(
+            self.key,
+            backend=default_backend()
+        )
         try:
-            # load public key from binary field
-            public_key = crypto_serialization.load_pem_public_key(
-                self.key,
-                backend=default_backend()
-            )
             public_key.verify(
-                signature,
+                base64.b64decode(signature),
                 message.encode(),
                 padding.PSS(
                     mgf=padding.MGF1(hashes.SHA256()),
@@ -495,7 +643,7 @@ class StudentRepositoryPublicKey(models.Model):
                 hashes.SHA256()
             )
             return True
-        except:
+        except InvalidSignature:
             return False
 
     def __str__(self):
@@ -509,7 +657,11 @@ class StudentRepositoryPublicKey(models.Model):
 
 class StudentRepositoryVersion(RepositoryVersion):
 
-    repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE)
+    repository = models.ForeignKey(
+        'StudentRepository',
+        on_delete=models.CASCADE,
+        related_name='versions'
+    )
 
     def __str__(self):
         return f'{self.repository}: {RepositoryVersion.__str__(self)}'
@@ -519,17 +671,19 @@ class StudentRepositoryVersion(RepositoryVersion):
         verbose_name_plural = _('Student Repository Versions')
 
 
-class Student(models.Model):
+class Student(User):
+    """
+    This is a special user type that is used to authenticate student repositories using
+    the repository attestation method.
+    """
+    domain = EnumField(Domain)
 
-    name = models.CharField(max_length=255, null=True, blank=True)
-    email = models.EmailField(null=True, blank=True)
     handle = models.CharField(
         max_length=255,
         null=False,
         unique=True,
         help_text=_('The student\'s GitHub handle.')
     )
-    joined = models.DateTimeField(default=datetime_now)
 
     tutor_key = models.ForeignKey(
         'TutorAPIKey',
@@ -542,10 +696,39 @@ class Student(models.Model):
         )
     )
 
+    login_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name='students',
+        help_text=_('The login user account associated with this student, if any.')
+    )
+
+    def clean(self):
+        # student users cannot login via a password
+        self.set_unusable_password()
+        self.username = f'{self.domain.label}/{self.handle}'
+        super().clean()
+
     @property
     def display(self):
-        return self.name or self.handle
+        return self.full_name or self.handle
     
+    @property
+    def authorized_repository(self):
+        """If this student is authenticated, this will be the StudentRepository they are authorized with."""
+        return self._authorized_repository
+    
+    @authorized_repository.setter
+    def authorized_repository(self, repo):
+        if repo is not None:
+            # some sanity checks
+            assert isinstance(repo, StudentRepository)
+            assert repo.student == self
+        self._authorized_repository = repo
+
     def __str__(self):
         return self.display
 
@@ -618,7 +801,7 @@ class Module(PolymorphicModel):
     topic = models.CharField(max_length=255, null=False, blank=True, default='')
     description = models.TextField(null=False, blank=True, default='')
 
-    repository = models.ForeignKey('CourseRepository', on_delete=models.CASCADE)
+    repository = models.ForeignKey('CourseRepository', on_delete=models.CASCADE, related_name='modules')
 
     added = models.ForeignKey(
         CourseRepositoryVersion,

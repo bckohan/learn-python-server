@@ -2,10 +2,17 @@
 Admin interface for all models in etc_player.
 """
 from typing import Any
+from django.urls import path
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.db.models.query import QuerySet
+from django.core.management import call_command
+from django.urls import reverse
 from django.http.request import HttpRequest
+from django.http.response import HttpResponseRedirect
 from learn_python_server.models import (
+    User,
     Course,
     Enrollment,
     StudentRepository,
@@ -13,6 +20,7 @@ from learn_python_server.models import (
     CourseRepository,
     CourseRepositoryVersion,
     StudentRepositoryVersion,
+    StudentRepositoryPublicKey,
     Module,
     Assignment,
     DocBuild,
@@ -36,7 +44,30 @@ class ReadOnlyMixin:
 
     def has_delete_permission(self, request, obj=None):
         return False
-    
+
+
+@admin.register(User)
+class LPUserAdmin(UserAdmin):
+    list_display = ('username', 'email', 'full_name', 'last_name', 'is_staff')
+
+    fieldsets = (
+        (None, {'fields': ('email', 'password')}),
+        ('Personal info', {'fields': ('full_name',)}),
+        ('Permissions', {
+            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+        }),
+        ('Dates', {'fields': ('date_joined',)}),
+    )
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('email', 'password1', 'password2'),
+        }),
+    )
+    ordering = ('email',)
+
+    readonly_fields = ('date_joined', 'last_login')
+
 
 # a tabular inline for enrollments
 class EnrollmentInline(admin.TabularInline):
@@ -56,6 +87,8 @@ class CourseAdmin(admin.ModelAdmin):
     ordering = ('-started',)
     inlines = [EnrollmentInline]
 
+    change_form_template = 'admin/course_change_form.html'
+
     def enrollment(self, obj):
         return obj.enrollments.count()
     
@@ -67,6 +100,19 @@ class CourseAdmin(admin.ModelAdmin):
         # return a link to obj.docs.url
         return format_html('<a href="{url}" target="_blank">docs</a>', url=obj.docs.url) if obj.docs else None
 
+    def get_urls(self):
+        urls = super().get_urls()
+        my_urls = [
+            path('<object_id>/build_docs/', self.admin_site.admin_view(self.build_docs), name='learn_python_server_course_build-docs'),
+        ]
+        return my_urls + urls
+
+    def build_docs(self, request, object_id):
+        course = Course.objects.get(pk=object_id)
+        call_command('update_course', [], course=str(course.pk))
+        self.message_user(request, f'{course.name} documentation was rebuilt.')
+        return HttpResponseRedirect(redirect_to=reverse('course_docs', kwargs={'course': object_id}))
+
 
 # a tabular inline for enrollments
 class StudentRepositoryInline(admin.TabularInline):
@@ -74,22 +120,67 @@ class StudentRepositoryInline(admin.TabularInline):
     extra = 0
 
 
+class StudentRepositoryPublicKey(ReadOnlyMixin, admin.TabularInline):
+    model = StudentRepositoryPublicKey
+    extra = 0
+
+    readonly_fields = ('key_str',)
+
+    def key_str(self, obj):
+        return obj.key_str
+    key_str.short_description = 'RSA Key'
+
+
+
+# need to override the default UserChangeForm to make the password fields not required
+class StudentChangeForm(UserChangeForm):
+    password = forms.CharField(widget=forms.HiddenInput(), required=False)
+
+
+class StudentCreationForm(UserCreationForm):
+    password1 = forms.CharField(
+        widget=forms.PasswordInput(attrs={'autocomplete': 'new-password'}),
+        required=False
+    )
+    password2 = forms.CharField(
+        widget=forms.PasswordInput(attrs={'autocomplete': 'new-password'}),
+        required=False
+    )
+
+
 # a custom admin for courses
 @admin.register(Student)
-class StudentAdmin(admin.ModelAdmin):
+class StudentAdmin(LPUserAdmin):
 
-    list_display = ('name', 'email', 'handle')
-    search_fields = ('name', 'email', 'handle')
-    ordering = ('name',)
-    readonly_fields = ('joined',)
+    form = StudentChangeForm
+    add_form = StudentCreationForm
+
+    list_display = ('handle', 'email', 'full_name', 'last_login')
+    search_fields = ('full_name', 'email', 'handle')
+    ordering = ('handle',)
+
+    fieldsets = (
+        (None, {'fields': ('handle', 'email',)}),
+        ('Personal info', {'fields': ('full_name',)}),
+        ('Dates', {'fields': ('date_joined', 'last_login')}),
+        ('Credentials', {'fields': ('tutor_key',)})
+    )
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('handle', 'email'),
+        }),
+        ('Personal info', {'fields': ('full_name',)}),
+        ('Credentials', {'fields': ('tutor_key',)}),
+    )
+    ordering = ('handle',)
+
     inlines = [StudentRepositoryInline, EnrollmentInline]
 
 
-@admin.register(CourseRepositoryVersion)
-class CourseRepositoryVersionAdmin(ReadOnlyMixin, admin.ModelAdmin):
+class CourseRepositoryVersionAdmin(ReadOnlyMixin, admin.TabularInline):
 
-    list_display = ('repo', 'git_branch', 'git_hash', 'commit_count', 'timestamp')
-    search_fields = ('repository__uri', 'repository__courses__name')
+    model = CourseRepositoryVersion
     ordering = ('-timestamp',)
     readonly_fields = ('timestamp', 'repository', 'git_branch', 'git_hash', 'commit_count')
 
@@ -100,11 +191,9 @@ class CourseRepositoryVersionAdmin(ReadOnlyMixin, admin.ModelAdmin):
         return super().get_queryset(request).select_related('repository')
 
 
-@admin.register(StudentRepositoryVersion)
-class StudentRepositoryVersionAdmin(ReadOnlyMixin, admin.ModelAdmin):
+class StudentRepositoryVersionAdmin(ReadOnlyMixin, admin.TabularInline):
 
-    list_display = ('repo', 'git_branch', 'git_hash', 'commit_count', 'timestamp')
-    search_fields = ('repository__uri', 'repository__student__name')
+    model = StudentRepositoryVersion
     ordering = ('-timestamp',)
     readonly_fields = ('timestamp', 'repository', 'git_branch', 'git_hash', 'commit_count')
 
@@ -186,19 +275,41 @@ class StudentRepositoryAdmin(admin.ModelAdmin):
     list_display = ('student_name', 'uri')
     search_fields = ('student__name', 'student__handle', 'student__email', 'uri')
     readonly_fields = ('student',)
+    inlines = [StudentRepositoryPublicKey, StudentRepositoryVersionAdmin]
 
     def student_name(self, obj):
         return obj.student.display
     
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
-        return super().get_queryset(request).select_related('student')
+        return super().get_queryset(request).select_related(
+            'student'
+        ).prefetch_related(
+            'keys',
+            'versions'
+        )
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         self.readonly_fields = ('student',)
         return super().change_view(request, object_id, form_url, extra_context)
 
+class CourseInlineAdmin(ReadOnlyMixin, admin.TabularInline):
 
-admin.register(CourseRepository)(admin.ModelAdmin)
+    model = Course
+    extra = 0
+
+
+@admin.register(CourseRepository)
+class CourseRepositoryAdmin(admin.ModelAdmin):
+
+    list_display = ('uri',)
+    search_fields = ('courses__name', 'uri')
+
+    inlines = [CourseInlineAdmin, CourseRepositoryVersionAdmin]
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).prefetch_related('versions', 'courses')
+
+
 admin.register(TutorAPIKey)(admin.ModelAdmin)
 
 admin.register(TutorExchange)(admin.ModelAdmin)

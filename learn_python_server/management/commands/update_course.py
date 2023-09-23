@@ -12,10 +12,9 @@ from learn_python_server.models import (
     DocBuild,
     Assignment
 )
+from learn_python_server.utils import TemporaryDirectory
 import re
 from pathlib import Path
-import tempfile
-import os
 import shutil
 import readline  # don't remove, this helps input() work better
 
@@ -98,12 +97,7 @@ class Command(BaseCommand):
             repository = CourseRepository.objects.get(courses__in=courses)
             self.stdout.write(_('Updating course repository {}...').format(repository.uri))
 
-            tmp_root = getattr(settings, 'TMP_DIR', None)
-            if tmp_root:
-                os.makedirs(tmp_root, exist_ok=True)
-            with tempfile.TemporaryDirectory(dir=tmp_root) as tmpdir:
-                tmpdir = Path(tmpdir)
-                repository.clone(tmpdir)
+            with repository:
 
                 repo_version, new_version = CourseRepositoryVersion.objects.get_or_create(
                     repository=repository,
@@ -118,82 +112,81 @@ class Command(BaseCommand):
                     self.stdout.write(_('Repository has not changed since last update.'))
                     return
 
-                with repository:
-                    repository.install()
-                    doc_html = repository.doc_build()
-                    if not doc_html.is_dir():
-                        raise CommandError(_('Could not find built documentation in {}').format(doc_html))
-                    
-                    course_structure = repository.course_structure()
+                repository.install()
+                doc_html = repository.doc_build()
+                if not doc_html.is_dir():
+                    raise CommandError(_('Could not find built documentation in {}').format(doc_html))
+                
+                course_structure = repository.course_structure()
 
-                    def list_to_str(list_or_str):
-                        if not list_or_str:
-                            return ''
-                        if isinstance(list_or_str, str):
-                            return list_or_str
-                        return '\n'.join(list_or_str)
+                def list_to_str(list_or_str):
+                    if not list_or_str:
+                        return ''
+                    if isinstance(list_or_str, str):
+                        return list_or_str
+                    return '\n'.join(list_or_str)
 
-                    modules = set()
-                    for course in courses:
-                        for module, tasks in course_structure.items():
-                            number = re.search(r'(?P<number>\d+)?$', module).groupdict().get('number', None)
-                            number = int(number) if number else None
-                            mod_obj, mod_is_new = Module.objects.get_or_create(
-                                name=module,
-                                repository=repository,
+                modules = set()
+                for course in courses:
+                    for module, tasks in course_structure.items():
+                        number = re.search(r'(?P<number>\d+)?$', module).groupdict().get('number', None)
+                        number = int(number) if number else None
+                        mod_obj, mod_is_new = Module.objects.get_or_create(
+                            name=module,
+                            repository=repository,
+                            defaults={
+                                'added': repo_version,
+                                'number': number
+                            }
+                        )
+                        if not mod_is_new and mod_obj.number != number:
+                            mod_obj.number = number
+                            mod_obj.save()
+                        elif mod_is_new:
+                            self.stdout.write(_('Adding module {}').format(mod_obj))
+                        modules.add(mod_obj.pk)
+
+                        current_tasks = set()
+                        for task_name, task_info in tasks.items():
+                            test_parts = task_info['test'].split('::')
+                            meta = {
+                                'number': int(task_info['number']),
+                                'todo': task_info['todo'],
+                                'hints': list_to_str(task_info['hints']),
+                                'requirements': list_to_str(task_info['requirements']),
+                                'test': '::'.join([str(Path(test_parts[0]).resolve().relative_to(repository.local.resolve())), *test_parts[1:]])
+                            }
+                            task_obj, task_is_new = Assignment.objects.get_or_create(
+                                name=task_name,
+                                module=mod_obj,
                                 defaults={
                                     'added': repo_version,
-                                    'number': number
+                                    **meta
                                 }
                             )
-                            if not mod_is_new and mod_obj.number != number:
-                                mod_obj.number = number
-                                mod_obj.save()
-                            elif mod_is_new:
-                                self.stdout.write(_('Adding module {}').format(mod_obj))
-                            modules.add(mod_obj.pk)
+                            current_tasks.add(task_obj.pk)
+                            if not task_is_new:
+                                for attr, val in meta.items():
+                                    setattr(task_obj, attr, val)
+                                task_obj.save()
+                            else:
+                                self.stdout.write(_('Adding assignment {}').format(task_obj))
 
-                            current_tasks = set()
-                            for task_name, task_info in tasks.items():
-                                test_parts = task_info['test'].split('::')
-                                meta = {
-                                    'number': int(task_info['number']),
-                                    'todo': task_info['todo'],
-                                    'hints': list_to_str(task_info['hints']),
-                                    'requirements': list_to_str(task_info['requirements']),
-                                    'test': '::'.join([str(Path(test_parts[0]).resolve().relative_to(repository.local.resolve())), *test_parts[1:]])
-                                }
-                                task_obj, task_is_new = Assignment.objects.get_or_create(
-                                    name=task_name,
-                                    module=mod_obj,
-                                    defaults={
-                                        'added': repo_version,
-                                        **meta
-                                    }
-                                )
-                                current_tasks.add(task_obj.pk)
-                                if not task_is_new:
-                                    for attr, val in meta.items():
-                                        setattr(task_obj, attr, val)
-                                    task_obj.save()
-                                else:
-                                    self.stdout.write(_('Adding assignment {}').format(task_obj))
+                    for removed_task in Assignment.objects.filter(module=mod_obj).exclude(pk__in=current_tasks):
+                        self.stdout.write(_('Removing assignment {}').format(removed_task))
+                        removed_task.ended = repo_version
+                        removed_task.save()
 
-                        for removed_task in Assignment.objects.filter(module=mod_obj).exclude(pk__in=current_tasks):
-                            self.stdout.write(_('Removing assignment {}').format(removed_task))
-                            removed_task.ended = repo_version
-                            removed_task.save()
+                for removed_module in Module.objects.filter(repository=repository).exclude(pk__in=modules):
+                    self.stdout.write(_('Removing module {}').format(removed_module))
+                    removed_module.ended = repo_version
+                    removed_module.save()
 
-                    for removed_module in Module.objects.filter(repository=repository).exclude(pk__in=modules):
-                        self.stdout.write(_('Removing module {}').format(removed_module))
-                        removed_module.ended = repo_version
-                        removed_module.save()
-
-                    doc_build, new_build = DocBuild.objects.get_or_create(
-                        repository=repo_version
-                    )
-                    if not doc_build.path.is_dir() or new_build:
-                        shutil.copytree(doc_html, doc_build.path)
+                doc_build, new_build = DocBuild.objects.get_or_create(
+                    repository=repo_version
+                )
+                if not doc_build.path.is_dir() or new_build:
+                    shutil.copytree(doc_html, doc_build.path, dirs_exist_ok=True)
 
                 # delete older doc builds for this repo
                 for old_build in DocBuild.objects.filter(repository__repository=repository).exclude(pk=doc_build.pk):

@@ -43,6 +43,7 @@ djangorestframework = "^3.14.0"
 [tool.poetry.group.dev.dependencies]
 ipython = "^8.13.2"
 ipdb = "^0.13.13"
+django-debug-toolbar = "^4.2.0"
 
 [build-system]
 requires = ["poetry-core"]

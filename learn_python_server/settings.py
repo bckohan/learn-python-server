@@ -45,6 +45,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'learn_python_server.middleware.NormalizeRepositoryMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -72,6 +73,8 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'learn_python_server.wsgi.application'
+
+AUTH_USER_MODEL = 'learn_python_server.User'
 
 
 # Password validation
@@ -175,8 +178,19 @@ DEFAULT_COURSE_REPOSITORY = 'https://github.com/bckohan/learn-python'
 # tempfile.TemporaryDirectory() if not set
 # TMP_DIR = BASE_DIR / 'tmp'
 
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'learn_python_server.auth.RepositorySignatureAuthentication',
+    ]
+}
+
 include(optional('local.py'))
 
+
+# student repository requests must be signed and timestamped within this 
+# many seconds, or they will be rejected
+LP_REQUEST_TIMEOUT = 300
 
 if DEBUG:
     STATICFILES_FINDERS = [
@@ -184,3 +198,14 @@ if DEBUG:
         'django.contrib.staticfiles.finders.AppDirectoriesFinder',
         'learn_python_server.finders.DocBuildFinder',
     ]
+
+    INSTALLED_APPS.insert(0, 'debug_toolbar')
+    MIDDLEWARE.insert(0, 'debug_toolbar.middleware.DebugToolbarMiddleware')
+    INTERNAL_IPS = [
+        '127.0.0.1',
+    ]
+else:
+    # security settings
+    
+    # you can override security settings by providing this file
+    include(optional('security.py'))
