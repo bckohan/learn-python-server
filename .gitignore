@@ -162,6 +162,7 @@ cython_debug/
 learn_python_server/local.py
 
 tmp/
-static/
+**/static/
 **/secrets/
 poetry.lock
+**/media/

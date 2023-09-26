@@ -350,7 +350,6 @@ class RepositoryVersion(models.Model):
     class Meta:
         abstract = True
         ordering = ['-commit_count']
-        unique_together = [('git_hash', 'git_branch')]
 
 
 class TutorAPIKey(models.Model):
@@ -388,6 +387,7 @@ class CourseRepositoryVersion(RepositoryVersion):
     class Meta:
         verbose_name = _('Course Repository Version')
         verbose_name_plural = _('Course Repository Versions')
+        unique_together = [('repository', 'git_hash', 'git_branch')]
 
 
 class DocBuild(models.Model):
@@ -511,6 +511,11 @@ class StudentRepository(Repository):
     )
 
     objects = StudentRepositoryManager()
+
+    @cached_property
+    def course_repository(self):
+        if hasattr(self, 'enrollment') and self.enrollment:
+            return self.enrollment.course.repository
 
     def clean(self):
         super().clean()
@@ -669,6 +674,7 @@ class StudentRepositoryVersion(RepositoryVersion):
     class Meta:
         verbose_name = _('Student Repository Version')
         verbose_name_plural = _('Student Repository Versions')
+        unique_together = [('repository', 'git_hash', 'git_branch')]
 
 
 class Student(User):
@@ -740,10 +746,15 @@ class Student(User):
 class TutorExchange(models.Model):
 
     role = EnumField(TutorRole)
-    message = models.TextField(null=False)
+    content = models.TextField(null=False)
+    is_function_call = models.BooleanField(null=False, default=False)
     timestamp = models.DateTimeField(null=False, db_index=True)
 
-    session = models.ForeignKey('TutorSession', on_delete=models.CASCADE)
+    session = models.ForeignKey(
+        'TutorSession',
+        on_delete=models.CASCADE,
+        related_name='exchanges'
+    )
 
     backend_extra = models.JSONField(null=True, blank=True)
 
@@ -751,6 +762,8 @@ class TutorExchange(models.Model):
         ordering = ['timestamp']
         verbose_name = _('Tutor Exchange')
         verbose_name_plural = _('Tutor Exchanges')
+        unique_together = [('timestamp', 'session')]
+        ordering = ('timestamp',)
 
 
 class TutorSession(models.Model):
@@ -759,7 +772,11 @@ class TutorSession(models.Model):
     start = models.DateTimeField(null=False, db_index=True)
     end = models.DateTimeField(null=False)
 
-    engagement = models.ForeignKey('TutorEngagement', on_delete=models.CASCADE)
+    engagement = models.ForeignKey(
+        'TutorEngagement',
+        on_delete=models.CASCADE,
+        related_name='sessions'
+    )
 
     assignment = models.ForeignKey(
         'Assignment',
@@ -774,6 +791,9 @@ class TutorSession(models.Model):
         verbose_name = _('Tutor Session')
         verbose_name_plural = _('Tutor Sessions')
 
+    def __str__(self):
+        return str(self.session_id)
+
 
 class TutorEngagement(models.Model):
 
@@ -781,12 +801,18 @@ class TutorEngagement(models.Model):
     start = models.DateTimeField(null=False, db_index=True)
     end = models.DateTimeField(null=False)
 
-    log = models.FileField(null=True, blank=True)
+    tz_name = models.CharField(max_length=64, default='')
+    tz_offset = models.SmallIntegerField(null=True, default=None)
+
+    log = models.FileField(null=True, blank=True, upload_to='tutor_logs')
 
     backend = EnumField(TutorBackend)
     backend_extra = models.JSONField(null=True, blank=True)
 
     repository = models.ForeignKey('StudentRepositoryVersion', on_delete=models.CASCADE)
+
+    def __str__(self):
+        return str(self.id)
 
     class Meta:
         ordering = ['-start']
@@ -801,7 +827,11 @@ class Module(PolymorphicModel):
     topic = models.CharField(max_length=255, null=False, blank=True, default='')
     description = models.TextField(null=False, blank=True, default='')
 
-    repository = models.ForeignKey('CourseRepository', on_delete=models.CASCADE, related_name='modules')
+    repository = models.ForeignKey(
+        'CourseRepository',
+        on_delete=models.CASCADE,
+        related_name='modules'
+    )
 
     added = models.ForeignKey(
         CourseRepositoryVersion,
@@ -838,7 +868,7 @@ class SpecialTopic(Module):
 
 class Assignment(models.Model):
 
-    module = models.ForeignKey('Module', on_delete=models.CASCADE)
+    module = models.ForeignKey('Module', on_delete=models.CASCADE, related_name='assignments')
 
     added = models.ForeignKey(
         CourseRepositoryVersion,
@@ -863,13 +893,13 @@ class Assignment(models.Model):
     hints = models.TextField(null=False, blank=True, default='')
     requirements = models.TextField(null=False, blank=True, default='')
 
-    test = models.CharField(max_length=255, null=False)
+    identifier = models.CharField(max_length=255, null=False)
 
     def __str__(self):
         return f'[{self.module}] ({self.number}) {self.name}'
 
     class Meta:
         ordering = ['number']
-        unique_together = [('module', 'name')]
+        unique_together = [('module', 'name'), ('module', 'identifier')]
         verbose_name = _('Assignment')
         verbose_name_plural = _('Assignments')

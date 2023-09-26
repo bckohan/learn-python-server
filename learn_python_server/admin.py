@@ -7,6 +7,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.db.models.query import QuerySet
+from django.db.models import Count
 from django.core.management import call_command
 from django.urls import reverse
 from django.http.request import HttpRequest
@@ -32,6 +33,7 @@ from learn_python_server.models import (
 )
 from django import forms
 from django.utils.html import format_html
+from django.utils.timezone import localtime
 
 
 class ReadOnlyMixin:
@@ -234,7 +236,7 @@ class AssignmentAdmin(ReadOnlyMixin, admin.ModelAdmin):
     ordering = ('module__name', 'number')
     readonly_fields = (
         'added', 'removed', 'module', 'number', 'name', 
-        'todo', 'hints', 'requirements', 'test'
+        'todo', 'hints', 'requirements', 'identifier'
     )
     list_filter = ('module', 'module__repository')
 
@@ -310,8 +312,131 @@ class CourseRepositoryAdmin(admin.ModelAdmin):
         return super().get_queryset(request).prefetch_related('versions', 'courses')
 
 
-admin.register(TutorAPIKey)(admin.ModelAdmin)
+@admin.register(TutorExchange)
+class TutorExchangeAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    pass
 
-admin.register(TutorExchange)(admin.ModelAdmin)
-admin.register(TutorEngagement)(admin.ModelAdmin)
-admin.register(TutorSession)(admin.ModelAdmin)
+
+class TutorExchangeInlineAdmin(ReadOnlyMixin, admin.TabularInline):
+    model = TutorExchange
+    extra = 0
+
+    fields = ('exchange', 'role', 'content')
+    readonly_fields = ('exchange',)
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+    
+    def exchange(self, instance):
+        url = reverse('admin:learn_python_server_tutorexchange_change', args=[instance.pk])
+        return format_html('<a href="{}">{}</a>', url, localtime(instance.timestamp))
+        
+    exchange.short_description = 'Timestamp'
+    
+@admin.register(TutorSession)
+class TutorSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    
+    list_display = ('engagement', 'start', 'end', 'assignment', 'num_exchanges')
+    search_fields = (
+        'engagement__repository__repository__student__full_name',
+        'engagement__repository__repository__student__email',
+        'engagement__repository__repository__student__handle',
+        'assignment__name',
+        'assignment__module__name',
+    )
+    list_filter = (
+        'engagement__repository__repository__enrollment__course__name',
+        'engagement__repository__repository__enrollment__course__repository__modules__name',
+        'engagement__repository__repository__enrollment__course__repository__modules__assignments__name',
+    )
+    
+    def engagement(self, obj):
+        return obj.engagement.repository.repository.student.display
+    
+    def num_exchanges(self, obj):
+        return obj.exchanges.count()
+
+    inlines = [TutorExchangeInlineAdmin,]
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'assignment'
+        ).prefetch_related('exchanges').annotate(num_exchanges=Count('exchanges'))
+
+
+class TutorSessionInlineAdmin(ReadOnlyMixin, admin.TabularInline):
+    model = TutorSession
+    extra = 0
+
+    fields = ('session', 'start', 'end', 'assignment', 'num_exchanges')
+    readonly_fields = ('session', 'num_exchanges')
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+    
+    def session(self, instance):
+        url = reverse('admin:learn_python_server_tutorsession_change', args=[instance.pk])
+        return format_html('<a href="{}">{}</a>', url, instance.session_id)
+        
+    session.short_description = 'Session ID'
+
+    def num_exchanges(self, instance):
+        return instance.num_exchanges
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'assignment'
+        ).prefetch_related('exchanges').annotate(num_exchanges=Count('exchanges'))
+
+
+@admin.register(TutorEngagement)
+class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
+
+    list_display = ('student', 'start', 'sessions', 'tasks', 'duration', 'view')
+    search_fields = (
+        'repository__repository__student__full_name',
+        'repository__repository__student__email',
+        'repository__repository__student__handle',
+        'sessions__assignment__name',
+        'sessions__assignment__module__name',
+    )
+    # list_filter = (
+    #     'repository__repository__enrollment__course__name',
+    #     'repository__repository__enrollment__course__repository__modules__name',
+    #     'repository__repository__enrollment__course__repository__modules__assignments__name',
+    # )
+    
+    def student(self, obj):
+        return obj.repository.repository.student.display
+    
+    def view(self, obj):
+        return format_html(
+            '<a href="{url}" target="_blank">view</a>',
+            url=reverse('tutor_engagement_detail', kwargs={'pk': obj.pk})
+        )
+
+
+    def duration(self, obj):
+        if obj.end:
+            return obj.end - obj.start
+        
+    def sessions(self, obj):
+        return obj.sessions.count()
+
+    def tasks(self, obj):
+        return obj.tasks
+
+    inlines = [TutorSessionInlineAdmin,]
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'repository',
+            'repository__repository',
+            'repository__repository__student'
+        ).prefetch_related('sessions').annotate(tasks=Count('sessions__assignment', unique=True))
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+
+
+admin.register(TutorAPIKey)(admin.ModelAdmin)

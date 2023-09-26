@@ -16,7 +16,7 @@ from split_settings.tools import include, optional
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(
-    os.environ.get('LEARN_PYTHON_SERVER_DIR', Path(__file__).resolve().parent.parent)
+    os.environ.get('LEARN_PYTHON_SERVER_DIR', Path(__file__).resolve().parent)
 )
 
 
@@ -185,7 +185,7 @@ REST_FRAMEWORK = {
     ]
 }
 
-include(optional('local.py'))
+include(optional(BASE_DIR / 'local.py'))
 
 
 # student repository requests must be signed and timestamped within this 
@@ -208,4 +208,4 @@ else:
     # security settings
     
     # you can override security settings by providing this file
-    include(optional('security.py'))
+    include(optional(BASE_DIR / 'security.py'))

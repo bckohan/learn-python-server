@@ -1,14 +1,22 @@
-from learn_python_server.models import DocBuild, StudentRepository
+from learn_python_server.models import (
+    DocBuild,
+    StudentRepository,
+    TutorEngagement
+)
 from django.http import (
     HttpResponseRedirect,
     HttpResponse,
     HttpResponseForbidden,
     HttpResponseNotFound,
-    JsonResponse
+    JsonResponse,
+    FileResponse
 )
+from django.http import Http404
 from django.conf import settings
 from learn_python_server.utils import normalize_repository
 from django.db.models import Q
+from django.views.generic import DetailView
+import os
 from django.utils.translation import gettext_lazy as _
 
 
@@ -96,3 +104,19 @@ def register(request, repository):
     return HttpResponseForbidden(
         _('Registration of {} has invalid signature.').format(repository)
     )
+
+
+def get_engagement_log(request, engagement_id, ext):
+    try:
+        log_file = TutorEngagement.objects.get(id=engagement_id).log
+        if log_file and os.path.exists(log_file.path):
+            return FileResponse(log_file.open(), content_type='application/octet-stream')
+        raise Http404()
+    except TutorEngagement.DoesNotExist as err:
+        raise Http404() from err
+
+
+class TutorEngagementDetailView(DetailView):
+    model = TutorEngagement
+    template_name = 'learn_python_server/engagement_detail.html'
+    context_object_name = 'engagement'

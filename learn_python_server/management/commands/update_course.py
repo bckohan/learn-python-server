@@ -154,7 +154,7 @@ class Command(BaseCommand):
                                 'todo': task_info['todo'],
                                 'hints': list_to_str(task_info['hints']),
                                 'requirements': list_to_str(task_info['requirements']),
-                                'test': '::'.join([str(Path(test_parts[0]).resolve().relative_to(repository.local.resolve())), *test_parts[1:]])
+                                'identifier': '::'.join([str(Path(test_parts[0]).resolve().relative_to(repository.local.resolve())), *test_parts[1:]])
                             }
                             task_obj, task_is_new = Assignment.objects.get_or_create(
                                 name=task_name,

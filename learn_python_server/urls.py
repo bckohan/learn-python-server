@@ -18,14 +18,26 @@ from django.contrib import admin
 from django.urls import path, register_converter, include
 from django.conf import settings
 from django.conf.urls.static import static
-from learn_python_server.views import redirect_latest_docs, register, course_docs, repository_docs
-from learn_python_server.api.views import AuthorizeTutorView, TutorEngagementViewSet
+from learn_python_server.views import (
+    redirect_latest_docs,
+    register,
+    course_docs,
+    repository_docs,
+    get_engagement_log,
+    TutorEngagementDetailView
+)
+from learn_python_server.api.views import (
+    AuthorizeTutorView,
+    TutorEngagementViewSet,
+    TutorEngagementLogViewSet
+)
 from django.contrib.staticfiles import handlers
 from rest_framework.routers import DefaultRouter
 
 
 router = DefaultRouter()
 router.register(r'engagements', TutorEngagementViewSet, basename='engagements')
+router.register(r'engagement_logs', TutorEngagementLogViewSet, basename='engagement_logs')
 
 
 class URLConverter:
@@ -48,7 +60,9 @@ urlpatterns = [
     path('register/<url:repository>', register, name='register'),
     path('api/authorize_tutor', AuthorizeTutorView.as_view(), name='authorize_tutor'),
     path('api/', include(router.urls)),
-    path('admin/', admin.site.urls),
+    path('media/tutor_logs/delphi_<uuid:engagement_id><str:ext>', get_engagement_log, name='tutor_log'),
+    path('tutor_engagement/<uuid:pk>', TutorEngagementDetailView.as_view(), name='tutor_engagement_detail'),
+    path('admin/', admin.site.urls)
 ]
 
 if settings.DEBUG:

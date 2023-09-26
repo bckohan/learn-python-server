@@ -24,6 +24,7 @@
             color: #fff;
         }
     </style>
+    {% if original.pk %}
     <script>
         function navigateToDocs(event) {
             event.preventDefault(); // This will prevent the default form action
@@ -58,6 +59,7 @@
             });
         });
     </script>
+    {% endif %}
 </div>
 {% endblock %}
 
