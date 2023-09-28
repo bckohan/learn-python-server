@@ -1,26 +1,27 @@
-from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.permissions import IsAdminUser
 from rest_framework.mixins import (
     CreateModelMixin,
     UpdateModelMixin,
     ListModelMixin,
-    RetrieveModelMixin
+    RetrieveModelMixin,
+    DestroyModelMixin
 )
 from django.http import Http404
-from django.db import transaction
 from rest_framework.response import Response
 from learn_python_server.api.permissions import (
-    IsAuthorizedRepository,
-    IsEngagementOwnerOrStaff,
+    CreateOrViewRepoItemPermission,
     HasAuthorizedTutor
 )
 from learn_python_server.api.serializers import (
     TutorEngagementSerializer,
-    TutorEngagementLogSerializer
+    LogFileSerializer
 )
-from learn_python_server.models import TutorEngagement, Student
+from learn_python_server.models import (
+    TutorEngagement,
+    Student,
+    LogFile
+)
 
 
 class AuthorizeTutorView(APIView):
@@ -43,6 +44,7 @@ class TutorEngagementViewSet(
 ):
 
     serializer_class = TutorEngagementSerializer
+    permission_classes = [CreateOrViewRepoItemPermission]
 
     def get_serializer_context(self):
         return {
@@ -50,26 +52,14 @@ class TutorEngagementViewSet(
             'request': self.request
         }
 
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        if self.action in ['create', 'update']:  # For POST requests
-            permission_classes = [IsAuthorizedRepository]
-        elif self.action in ['list', 'retrieve']:  # For GET requests
-            permission_classes = [IsEngagementOwnerOrStaff]
-        else:
-            permission_classes = [IsAdminUser]  # anything else
-        return [permission() for permission in permission_classes]
-
     def get_queryset(self):
         if self.request.user.is_superuser or self.request.user.is_staff:
             return TutorEngagement.objects.all()
         elif isinstance(self.request.user, Student):
             return TutorEngagement.objects.filter(
-                repository__repository=self.request.user.authorized_repository
+                repository=self.request.user.authorized_repository
             ).distinct()
-        return TutorEngagement.objects.filter()
+        return TutorEngagement.objects.none()
     
     def create(self, request, *args, **kwargs):
         try:
@@ -87,6 +77,34 @@ class TutorEngagementViewSet(
             return super().create(request, *args, **kwargs)
 
 
-class TutorEngagementLogViewSet(TutorEngagementViewSet):
+class LogFileViewSet(
+    CreateModelMixin,
+    ListModelMixin,
+    RetrieveModelMixin,
+    DestroyModelMixin,
+    GenericViewSet
+):
+    
+    serializer_class = LogFileSerializer
+    permission_classes = [CreateOrViewRepoItemPermission]
 
-    serializer_class = TutorEngagementLogSerializer
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            'request': self.request
+        }
+
+    def get_queryset(self):
+        if self.request.user.is_superuser or self.request.user.is_staff:
+            return LogFile.objects.all()
+        elif isinstance(self.request.user, Student):
+            return LogFile.objects.filter(
+                repository=self.request.user.authorized_repository
+            ).distinct()
+        return LogFile.objects.none()
+    
+    # def create(self, request, *args, **kwargs):
+    #     import ipdb
+    #     ipdb.set_trace()
+    #     ret = super().create(request, *args, **kwargs)
+    #     return ret

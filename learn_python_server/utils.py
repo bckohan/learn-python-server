@@ -4,6 +4,35 @@ import tempfile
 from django.conf import settings
 from django.utils import timezone
 import os
+import hashlib
+
+
+def num_lines(file):
+    def blocks(files, size=65536):
+        while True:
+            b = files.read(size)
+            if not b:
+                break
+            yield b
+
+    count = sum(buffer.count('\n') for buffer in blocks(file))
+    file.seek(0)
+    return count
+
+
+def calculate_sha256(file_handle):
+    sha256_hash = hashlib.sha256()
+    for byte_block in iter(lambda: file_handle.read(4096), b''):
+        sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+
+def headers_match(file1, file2, check_size):
+    while check_size > 0:
+        if file1.readline() != file2.readline():
+            break
+        check_size -= 1
+    return check_size == 0
 
 
 class TemporaryDirectory(tempfile.TemporaryDirectory):

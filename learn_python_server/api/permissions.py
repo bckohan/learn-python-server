@@ -1,5 +1,8 @@
 from rest_framework import permissions
-from learn_python_server.models import Student, StudentRepositoryVersion
+from learn_python_server.models import (
+    Student,
+    StudentRepository
+)
 
 
 class IsAuthorizedRepository(permissions.BasePermission):
@@ -14,20 +17,28 @@ class IsAuthorizedRepository(permissions.BasePermission):
             # Check if the user has an authorized repository.
             return request.user.authorized_repository.student == request.user
         return False
-    
 
-class IsEngagementOwnerOrStaff(permissions.BasePermission):
+
+class IsRepositoryOwnerOrStaff(permissions.BasePermission):
     """
-    Only works for TutorEngagement objects. Allows access if the user is a staff member, 
-    a super user or the owner of the tutor engagement record.
+    Works for objects that have a repository field that is a ForeignKey to a StudentRepository.
+    Grants access is the authenticated user is staff, a super user or the owner of the repository.
     """
     
-    def has_object_permission(self, request, view, tutor_engagement):
+    def has_object_permission(self, request, view, obj):
         if request.user.is_staff or request.user.is_superuser:
             return True
-        return tutor_engagement.repository in StudentRepositoryVersion.objects.filter(
-            repository__student__in=request.user.students
-        )
+        return obj.repository in StudentRepository.objects.filter(
+            student__in=request.user.students.all()
+        ) or obj.repository == request.user.authorized_repository
+
+
+class CreateOrViewRepoItemPermission(IsAuthorizedRepository, IsRepositoryOwnerOrStaff):
+    
+    def has_permission(self, request, view):
+        if view.action == 'create':
+            return super().has_permission(request, view)
+        return True
 
 
 class HasAuthorizedTutor(IsAuthorizedRepository):

@@ -20,7 +20,6 @@ from learn_python_server.models import (
     Student,
     CourseRepository,
     CourseRepositoryVersion,
-    StudentRepositoryVersion,
     StudentRepositoryPublicKey,
     Module,
     Assignment,
@@ -193,22 +192,6 @@ class CourseRepositoryVersionAdmin(ReadOnlyMixin, admin.TabularInline):
         return super().get_queryset(request).select_related('repository')
 
 
-class StudentRepositoryVersionAdmin(ReadOnlyMixin, admin.TabularInline):
-
-    model = StudentRepositoryVersion
-    ordering = ('-timestamp',)
-    readonly_fields = ('timestamp', 'repository', 'git_branch', 'git_hash', 'commit_count')
-
-    def repo(self, obj):
-        return obj.repository.uri
-    
-    def student(self, obj):
-        return obj.repository.student.display
-    
-    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
-        return super().get_queryset(request).select_related('repository', 'repository__student')
-
-
 @admin.register(DocBuild)
 class DocBuildAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
@@ -277,7 +260,7 @@ class StudentRepositoryAdmin(admin.ModelAdmin):
     list_display = ('student_name', 'uri')
     search_fields = ('student__name', 'student__handle', 'student__email', 'uri')
     readonly_fields = ('student',)
-    inlines = [StudentRepositoryPublicKey, StudentRepositoryVersionAdmin]
+    inlines = [StudentRepositoryPublicKey]
 
     def student_name(self, obj):
         return obj.student.display
@@ -285,10 +268,7 @@ class StudentRepositoryAdmin(admin.ModelAdmin):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(
             'student'
-        ).prefetch_related(
-            'keys',
-            'versions'
-        )
+        ).prefetch_related('keys')
 
     def change_view(self, request, object_id, form_url='', extra_context=None):
         self.readonly_fields = ('student',)
@@ -338,20 +318,20 @@ class TutorSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
     
     list_display = ('engagement', 'start', 'end', 'assignment', 'num_exchanges')
     search_fields = (
-        'engagement__repository__repository__student__full_name',
-        'engagement__repository__repository__student__email',
-        'engagement__repository__repository__student__handle',
+        'engagement__repository__student__full_name',
+        'engagement__repository__student__email',
+        'engagement__repository__student__handle',
         'assignment__name',
         'assignment__module__name',
     )
     list_filter = (
-        'engagement__repository__repository__enrollment__course__name',
-        'engagement__repository__repository__enrollment__course__repository__modules__name',
-        'engagement__repository__repository__enrollment__course__repository__modules__assignments__name',
+        'engagement__repository__enrollment__course__name',
+        'engagement__repository__enrollment__course__repository__modules__name',
+        'engagement__repository__enrollment__course__repository__modules__assignments__name',
     )
     
     def engagement(self, obj):
-        return obj.engagement.repository.repository.student.display
+        return obj.engagement.repository.student.display
     
     def num_exchanges(self, obj):
         return obj.exchanges.count()
@@ -394,20 +374,20 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
     list_display = ('student', 'start', 'sessions', 'tasks', 'duration', 'view')
     search_fields = (
-        'repository__repository__student__full_name',
-        'repository__repository__student__email',
-        'repository__repository__student__handle',
+        'repository__student__full_name',
+        'repository__student__email',
+        'repository__student__handle',
         'sessions__assignment__name',
         'sessions__assignment__module__name',
     )
     # list_filter = (
-    #     'repository__repository__enrollment__course__name',
-    #     'repository__repository__enrollment__course__repository__modules__name',
-    #     'repository__repository__enrollment__course__repository__modules__assignments__name',
+    #     'repository__enrollment__course__name',
+    #     'repository__enrollment__course__repository__modules__name',
+    #     'repository__enrollment__course__repository__modules__assignments__name',
     # )
     
     def student(self, obj):
-        return obj.repository.repository.student.display
+        return obj.repository.student.display
     
     def view(self, obj):
         return format_html(
@@ -431,8 +411,7 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(
             'repository',
-            'repository__repository',
-            'repository__repository__student'
+            'repository__student'
         ).prefetch_related('sessions').annotate(tasks=Count('sessions__assignment', unique=True))
 
     def has_delete_permission(self, request, obj=None):

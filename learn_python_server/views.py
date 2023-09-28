@@ -1,7 +1,8 @@
 from learn_python_server.models import (
     DocBuild,
     StudentRepository,
-    TutorEngagement
+    TutorEngagement,
+    LogFile
 )
 from django.http import (
     HttpResponseRedirect,
@@ -106,13 +107,21 @@ def register(request, repository):
     )
 
 
-def get_engagement_log(request, engagement_id, ext):
+def get_log(request, log_name):
     try:
-        log_file = TutorEngagement.objects.get(id=engagement_id).log
-        if log_file and os.path.exists(log_file.path):
-            return FileResponse(log_file.open(), content_type='application/octet-stream')
+        log_file = LogFile.objects.get(log__icontains=log_name)
+        if (
+            os.path.exists(log_file.log.path) and (
+                (request.user.is_staff or request.user.is_superuser)
+                or (
+                    log_file.repository in StudentRepository.objects.filter(student__in=request.user.students.all())
+                    or log_file.repository == request.user.authorized_repository
+                )
+            )
+        ):
+            return FileResponse(log_file.log.open(), content_type='application/gzip')
         raise Http404()
-    except TutorEngagement.DoesNotExist as err:
+    except LogFile.DoesNotExist as err:
         raise Http404() from err
 
 

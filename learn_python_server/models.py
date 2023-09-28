@@ -8,7 +8,12 @@ from enum_properties import p, s
 from django_enum import TextChoices, IntegerChoices
 from django.utils.translation import gettext_lazy as _
 from polymorphic.models import PolymorphicModel
-from learn_python_server.utils import normalize_url, TemporaryDirectory
+from learn_python_server.utils import (
+    normalize_url,
+    TemporaryDirectory,
+    calculate_sha256,
+    num_lines
+)
 from django.core.exceptions import ValidationError, SuspiciousOperation
 import subprocess
 import os
@@ -28,6 +33,11 @@ from django.contrib.auth.models import AbstractUser, UserManager, PermissionsMix
 from polymorphic.models import PolymorphicModel, PolymorphicManager
 import base64
 import time
+import gzip
+from typing import TextIO, Optional
+from dateutil.parser import parse as ts_parse
+from dateutil.parser import ParserError
+from django.core.validators import MinLengthValidator, MaxLengthValidator
 
 
 class Domain(IntegerChoices, s('url')):
@@ -660,23 +670,6 @@ class StudentRepositoryPublicKey(models.Model):
         verbose_name_plural = _('Student Repository Public Keys')
 
 
-class StudentRepositoryVersion(RepositoryVersion):
-
-    repository = models.ForeignKey(
-        'StudentRepository',
-        on_delete=models.CASCADE,
-        related_name='versions'
-    )
-
-    def __str__(self):
-        return f'{self.repository}: {RepositoryVersion.__str__(self)}'
-    
-    class Meta:
-        verbose_name = _('Student Repository Version')
-        verbose_name_plural = _('Student Repository Versions')
-        unique_together = [('repository', 'git_hash', 'git_branch')]
-
-
 class Student(User):
     """
     This is a special user type that is used to authenticate student repositories using
@@ -804,12 +797,18 @@ class TutorEngagement(models.Model):
     tz_name = models.CharField(max_length=64, default='')
     tz_offset = models.SmallIntegerField(null=True, default=None)
 
-    log = models.FileField(null=True, blank=True, upload_to='tutor_logs')
+    log = models.ForeignKey(
+        'LogFile',
+        null=True,
+        default=None,
+        related_name='engagement',
+        on_delete=models.SET_NULL
+    )
 
     backend = EnumField(TutorBackend)
     backend_extra = models.JSONField(null=True, blank=True)
 
-    repository = models.ForeignKey('StudentRepositoryVersion', on_delete=models.CASCADE)
+    repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE)
 
     def __str__(self):
         return str(self.id)
@@ -900,6 +899,209 @@ class Assignment(models.Model):
 
     class Meta:
         ordering = ['number']
-        unique_together = [('module', 'name'), ('module', 'identifier')]
+        unique_together = [('module', 'name')]
         verbose_name = _('Assignment')
         verbose_name_plural = _('Assignments')
+
+
+class LogFileManager(models.Manager):
+
+    def get_queryset(self):
+        return super().get_queryset().select_related(
+            'repository',
+            'repository__enrollment',
+            'repository__student'
+        )
+
+
+_DEFAULT_REGEX = re.compile(
+    r'^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - '
+    r'(?P<logger>\w+) - (?:\[(?P<level_no>\d+)\])?(?P<level>\w+) - (?P<message>.*)'
+)
+
+class LogFile(models.Model):
+
+    objects = LogFileManager()
+
+    class LogFileType(IntegerChoices, s('prefix'), p('regexes')):
+        
+        UNKNOWN = 0, 'Unknown', None,           [_DEFAULT_REGEX]
+        GENERAL = 1, 'General', 'learn_python', [_DEFAULT_REGEX]
+        TESTING = 2, 'Testing', 'testing',      [_DEFAULT_REGEX,]
+        TUTOR   = 3, 'Tutor',   'delphi',       [_DEFAULT_REGEX]
+
+        def unmarshall(self, params):
+            if params:
+                try:
+                    params['timestamp'] = ts_parse(params['timestamp'])
+                except ParserError:
+                    pass
+                try:
+                    params['level'] = (
+                        params.get('level_no', None) or
+                        LogEvent.LogLevel(params.get('level', None)) or 
+                        LogEvent.LogLevel(params.get('level_no', None))
+                    )
+                except ValueError:
+                    params['level'] = LogEvent.LogLevel.NOTSET
+                if isinstance(params['level'], str):
+                    params['level'] = int(params['level'])
+            return params
+
+    sha256_hash = models.CharField(
+        max_length=64,
+        null=False,
+        validators=[MinLengthValidator(64), MaxLengthValidator(64)]
+    )
+
+    repository = models.ForeignKey(StudentRepository, on_delete=models.CASCADE)
+    type = EnumField(LogFileType, db_index=True, blank=True, default=LogFileType.UNKNOWN)
+    log = models.FileField(upload_to='log_uploads', null=True, default=None)
+    date = models.DateField(null=True, db_index=True, blank=True)
+    uploaded_at = models.DateTimeField(default=datetime_now, db_index=True)
+    num_lines = models.PositiveIntegerField(null=False, default=0)
+    processed = models.BooleanField(
+        null=False,
+        default=False,
+        db_index=True,
+        blank=True,
+        help_text=_('Whether or not the events have been scraped from the log file.')
+    )
+
+    class LogIterator:
+        """
+        Iterate over each message in the log file. Each message is a dictionary of 
+        parameters returned by the corresponding log regex.
+        """
+        log_file = None
+
+        file_handle: Optional[TextIO] = None
+
+        # we need to lookhead b/c multi line messages are possible
+        next_line: Optional[str] = None
+        line_no: int = -1
+
+        def __init__(self, log_file):
+            self.log_file = log_file
+            log_file = Path(log_file.path.path)
+            if log_file.is_file():
+                if str(log_file).endswith('.gz'):
+                    self.file_handle = gzip.open(log_file, 'rt', encoding='utf-8')
+                else:
+                    self.file_handle = open(log_file, 'rt', encoding='utf-8')
+                self.next_line = self.file_handle.readline()
+                self.line_no += 1
+
+        def readline(self):
+            self.next_line = self.file_handle.readline()
+            self.next_line_match = self.log_file.type.regexes[0].search(self.next_line)
+            self.line_no += 1
+            return self.next_line
+        
+        def __next__(self):
+            if self.file_handle is None or self.next_line is None:
+                raise StopIteration
+            
+            match = self.log_file.type.regexes.search(self.next_line)
+            if not match:
+                self.readline()
+                return {}
+            
+            def additional_params():
+                for regex in self.log_file.type.regexes[1:]:
+                    if match := regex.search(self.next_line):
+                        params.update(match.groupdict())
+                        break
+
+            params = match.groupdict()
+            additional_params()
+            params['line_begin'] = self.line_no
+            while next_line := self.readline() and self.next_line_match is None:
+                params.setdefault('message', '')
+                params['message'] += f'\n{next_line}'
+                additional_params()
+            
+            params['line_end'] = self.line_no
+            return self.log_file.type.unmarshall(params)
+        
+    def __iter__(self):
+        return self.LogIterator(self)
+    
+    def __str__(self):
+        return f'{self.repository.uri}: {Path(self.log.path).relative_to(settings.MEDIA_ROOT)}'
+
+    class Meta:
+        ordering = [('-date', '-uploaded_at')]
+        verbose_name = _('Log File')
+        verbose_name_plural = _('Log Files')
+        index_together = (('repository', 'sha256_hash'),)
+        unique_together = (('repository', 'sha256_hash'),)
+
+
+class LogEvent(PolymorphicModel):
+
+    class LogLevel(IntegerChoices, s('numeric'), s('alts')):
+
+        NOTSET    = 0,  'NOTSET',   []
+        DEBUG     = 10, 'DEBUG',    []
+        INFO      = 20, 'INFO',     []
+        WARN      = 30, 'WARN',     ['WARNING']
+        ERROR     = 40, 'ERROR',    ['EXCEPTION']
+        CRITICAL  = 50, 'CRITICAL', ['FATAL']
+
+        def __lt__(self, other):
+            return self.value < other.value
+        
+        def __lte__(self, other):
+            return self.value <= other.value
+        
+        def __gt__(self, other):
+            return self.value > other.value
+        
+        def __gte__(self, other):
+            return self.value >= other.value
+
+    timestamp = models.DateTimeField(null=False, db_index=True)
+    level = EnumField(LogLevel, db_index=True, strict=False)
+
+    line_begin = models.PositiveIntegerField()
+    line_end = models.PositiveIntegerField()
+
+    log = models.ForeignKey(
+        LogFile,
+        on_delete=models.CASCADE,
+        related_name='events',
+        null=True,
+        default=None
+    )
+    message = models.TextField(null=False, blank=True, default='')
+    logger = models.CharField(null=False, blank=True, default='')
+
+    class Meta:
+        unique_together = [('timestamp', 'log')]
+
+
+class TestEvent(LogEvent):
+
+    class Runner(IntegerChoices):
+
+        STUDENT = 0, 'Student'
+        CI      = 1, 'Continuous Integration'
+        SERVER  = 2, 'Server'
+
+    class Result(IntegerChoices):
+
+        PASS  = 0, 'Passed'
+        FAIL  = 1, 'Failed'
+        ERROR = 2, 'Errored'
+        SKIP  = 3, 'Skipped'
+
+    runner = EnumField(Runner, db_index=True)
+    result = EnumField(Result, db_index=True)
+
+    assignment = models.ManyToManyField(Assignment, related_name='events')
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = _('Test Event')
+        verbose_name_plural = _('Test Events')
