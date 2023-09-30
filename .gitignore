@@ -166,3 +166,4 @@ tmp/
 **/secrets/
 poetry.lock
 **/media/
+**/.DS_Store

@@ -1,8 +1,8 @@
+from django.utils.translation import gettext_lazy as _
 from learn_python_server.models import StudentRepository
+from learn_python_server.utils import normalize_repository
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
-from learn_python_server.utils import normalize_repository
-from django.utils.translation import gettext_lazy as _
 
 
 class RepositorySignatureAuthentication(BaseAuthentication):
@@ -13,7 +13,9 @@ class RepositorySignatureAuthentication(BaseAuthentication):
             repository = normalize_repository(repository)
 
             try:
-                repo = StudentRepository.objects.get(uri=repository)
+                repo, created = StudentRepository.objects.get_or_create(uri=repository)
+                if created:
+                    repo.synchronize_keys()
                 if repo.verify(request):
                     repo.student.authorized_repository = repo
                     return (repo.student, None)

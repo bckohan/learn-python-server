@@ -1,22 +1,23 @@
-from django.core.management.base import BaseCommand, CommandError
+import re
+import readline  # don't remove, this helps input() work better
+import shutil
+from pathlib import Path
+
 from django.conf import settings
-from django.utils.translation import gettext_lazy as _
-from django.db.models import Q
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 from django.utils.timezone import now
+from django.utils.translation import gettext_lazy as _
 from learn_python_server.models import (
+    Assignment,
     Course,
     CourseRepository,
     CourseRepositoryVersion,
-    Module,
     DocBuild,
-    Assignment
+    Module,
 )
 from learn_python_server.utils import TemporaryDirectory
-import re
-from pathlib import Path
-import shutil
-import readline  # don't remove, this helps input() work better
 
 
 class Command(BaseCommand):

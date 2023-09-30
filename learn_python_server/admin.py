@@ -2,37 +2,42 @@
 Admin interface for all models in etc_player.
 """
 from typing import Any
-from django.urls import path
+
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
-from django.db.models.query import QuerySet
-from django.db.models import Count
 from django.core.management import call_command
-from django.urls import reverse
+from django.db.models import Count
+from django.db.models.query import QuerySet
 from django.http.request import HttpRequest
 from django.http.response import HttpResponseRedirect
-from learn_python_server.models import (
-    User,
-    Course,
-    Enrollment,
-    StudentRepository,
-    Student,
-    CourseRepository,
-    CourseRepositoryVersion,
-    StudentRepositoryPublicKey,
-    Module,
-    Assignment,
-    DocBuild,
-    TutorAPIKey,
-    TutorExchange,
-    TutorEngagement,
-    TutorSession,
-    SpecialTopic
-)
-from django import forms
+from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.timezone import localtime
+from django.utils.translation import gettext_lazy as _
+from learn_python_server.models import (
+    Assignment,
+    Course,
+    CourseRepository,
+    CourseRepositoryVersion,
+    DocBuild,
+    Enrollment,
+    LogFile,
+    LogEvent,
+    TestEvent,
+    Module,
+    SpecialTopic,
+    Student,
+    StudentRepository,
+    StudentRepositoryPublicKey,
+    TutorAPIKey,
+    TutorEngagement,
+    TutorExchange,
+    TutorSession,
+    User,
+)
+from django.utils.html import mark_safe
 
 
 class ReadOnlyMixin:
@@ -74,7 +79,7 @@ class LPUserAdmin(UserAdmin):
 class EnrollmentInline(admin.TabularInline):
     model = Enrollment
     extra = 0
-    readonly_fields = ('joined', 'last_activity')
+    readonly_fields = ('student', 'joined', 'last_activity')
     #raw_id_fields = ('repository',)
 
 
@@ -372,7 +377,7 @@ class TutorSessionInlineAdmin(ReadOnlyMixin, admin.TabularInline):
 @admin.register(TutorEngagement)
 class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
-    list_display = ('student', 'start', 'sessions', 'tasks', 'duration', 'view')
+    list_display = ('student', 'start', 'sessions', 'tasks', 'duration', 'view', 'log_file')
     search_fields = (
         'repository__student__full_name',
         'repository__student__email',
@@ -416,6 +421,100 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return True
+    
+    def log_file(self, obj):
+        url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
+        return format_html('<a href="{}">{}</a>', url, obj.log.log.name)
+    
+    log_file.short_description = _('Log File')
+
+
+@admin.register(LogFile)
+class LogFileAdmin(ReadOnlyMixin, admin.ModelAdmin):
+
+    list_display = ('student', 'date', 'repository', 'type', 'log', 'uploaded_at', 'num_lines', 'processed')
+    search_fields = (
+        'repository__student__full_name',
+        'repository__student__email',
+        'repository__student__handle',
+        'repository__uri'
+    )
+    list_filter = (
+        'type',
+        'processed'
+    )
+    
+    def student(self, obj):
+        return obj.repository.student.display
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'repository',
+            'repository__student'
+        )
+    
+    def has_delete_permission(self, request, obj=None):
+        return True
+    
+    def log_file(self, obj):
+        url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
+        return format_html('<a href="{}">{}</a>', url, obj.log.name)
+    
+    log_file.short_description = _('Log File')
+
+
+@admin.register(LogEvent)
+class LogEventAdmin(ReadOnlyMixin, admin.ModelAdmin):
+
+    list_display = ('timestamp', 'level', 'student')
+    search_fields = (
+        'log__repository__student__full_name',
+        'log__repository__student__handle',
+        'log__repository__student__email'
+    )
+    list_filter = (
+        'level',
+    )
+    
+    def student(self, obj):
+        if obj.log:
+            return obj.log.repository.student.display
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'log__repository',
+            'log__repository__student'
+        )
+    
+    def log_file(self, obj):
+        url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
+        return format_html('<a href="{}">{}</a>', url, obj.log.name)
+    
+    exclude = ('message',)
+
+    readonly_fields = ['message2']
+
+    def message2(self, obj):
+        return format_html('<pre>{}</pre>', obj.message)
+    message2.short_description = 'Message'
+    
+    log_file.short_description = _('Log File')
+
+
+@admin.register(TestEvent)
+class TestEventAdmin(LogEventAdmin):
+
+    list_display = ('timestamp', 'level', 'student', 'result', 'runner', 'assignment')
+    
+    list_filter = (
+        *LogEventAdmin.list_filter,
+        'runner',
+    )
+
+    def result_display(self, obj):
+        import ipdb
+        ipdb.set_trace()
+        return mark_safe(str(obj.result))
 
 
 admin.register(TutorAPIKey)(admin.ModelAdmin)

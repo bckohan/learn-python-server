@@ -14,26 +14,25 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
-from django.urls import path, register_converter, include
 from django.conf import settings
 from django.conf.urls.static import static
-from learn_python_server.views import (
-    redirect_latest_docs,
-    register,
-    course_docs,
-    repository_docs,
-    get_log,
-    TutorEngagementDetailView
-)
+from django.contrib import admin
+from django.contrib.staticfiles import handlers
+from django.urls import include, path, register_converter
 from learn_python_server.api.views import (
     AuthorizeTutorView,
+    LogFileViewSet,
     TutorEngagementViewSet,
-    LogFileViewSet
 )
-from django.contrib.staticfiles import handlers
+from learn_python_server.views import (
+    TutorEngagementDetailView,
+    course_docs,
+    get_log,
+    redirect_latest_docs,
+    register,
+    repository_docs,
+)
 from rest_framework.routers import DefaultRouter
-
 
 router = DefaultRouter()
 router.register(r'engagements', TutorEngagementViewSet, basename='engagements')
@@ -56,7 +55,7 @@ register_converter(URLConverter, 'url')
 urlpatterns = [
     path('', redirect_latest_docs, name='redirect_latest_docs'),
     path('docs/<str:course>', course_docs, name='course_docs'),
-    path('docs/<str:repository>', repository_docs, name='repository_docs'),
+    path('docs/<url:repository>', repository_docs, name='repository_docs'),
     path('register/<url:repository>', register, name='register'),
     path('api/authorize_tutor', AuthorizeTutorView.as_view(), name='authorize_tutor'),
     path('api/', include(router.urls)),

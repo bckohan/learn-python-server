@@ -1,37 +1,59 @@
-from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
-from pathlib import Path
+import hashlib
+import os
 import tempfile
+from gzip import GzipFile
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
 from django.conf import settings
 from django.utils import timezone
-import os
-import hashlib
+
+
+def is_gzip(file):
+    is_gz = file.read(2) == b'\x1f\x8b'
+    file.seek(0)
+    return is_gz
 
 
 def num_lines(file):
+    is_gz = False
     def blocks(files, size=65536):
         while True:
-            b = files.read(size)
+            if is_gz:
+                with GzipFile(fileobj=BytesIO(files.read(size))) as d_files:
+                    b = d_files.read(size)
+            else:
+                b = files.read(size)
             if not b:
                 break
             yield b
 
-    count = sum(buffer.count('\n') for buffer in blocks(file))
+    file.seek(0)
+    is_gz = is_gzip(file)
+    count = sum(buffer.count(b'\n') for buffer in blocks(file))
     file.seek(0)
     return count
 
 
 def calculate_sha256(file_handle):
     sha256_hash = hashlib.sha256()
+    file_handle.seek(0)
     for byte_block in iter(lambda: file_handle.read(4096), b''):
         sha256_hash.update(byte_block)
+    file_handle.seek(0)
     return sha256_hash.hexdigest()
 
 
 def headers_match(file1, file2, check_size):
+    file1.seek(0)
+    file2.seek(0)
     while check_size > 0:
         if file1.readline() != file2.readline():
             break
         check_size -= 1
+    file1.seek(0)
+    file2.seek(0)
     return check_size == 0
 
 

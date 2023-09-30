@@ -1,28 +1,30 @@
-from rest_framework.serializers import ModelSerializer, CharField, IntegerField
-from learn_python_server.models import (
-    TutorEngagement,
-    TutorSession,
-    TutorExchange,
-    Student,
-    Assignment,
-    LogFile
-)
-from django_enum.drf import EnumField as DRFEnumField
+import gzip
+import os
+import re
+from io import BytesIO
+from uuid import UUID
+
+from dateutil.parser import parse as parse_date
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.db import transaction
 from django.db.models import Q
-import os
-import gzip
-import re
-from dateutil.parser import parse as parse_date
 from django.urls.converters import get_converter
-from uuid import UUID
+from django_enum.drf import EnumField as DRFEnumField
+from learn_python_server.models import (
+    Assignment,
+    LogFile,
+    Student,
+    TutorEngagement,
+    TutorExchange,
+    TutorSession,
+)
 from learn_python_server.utils import (
     calculate_sha256,
+    headers_match,
+    is_gzip,
     num_lines,
-    headers_match
 )
-from io import BytesIO
-from django.core.files.uploadedfile import InMemoryUploadedFile
+from rest_framework.serializers import CharField, IntegerField, ModelSerializer
 
 
 class StudentSerializer(ModelSerializer):
@@ -166,13 +168,16 @@ class LogFileSerializer(ModelSerializer):
     LOG_NAME_DATE_RGX = re.compile(r'(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})')
 
     def create(self, validated_data):
+        # import ipdb
+        # ipdb.set_trace()
         with transaction.atomic():
             log = validated_data.get('log')
             if log:
                 # Check if file is not gzip compressed
-                if not self.is_gzip(log):
+                if not is_gzip(log):
                     # Compress file and replace the original file in validated_data
-                    validated_data['log'] = self.compress_file(log)
+                    log = self.compress_file(log)
+                    validated_data['log'] = log
             
             date = validated_data.pop('date', None)
             if date is None:
@@ -199,7 +204,7 @@ class LogFileSerializer(ModelSerializer):
                     'num_lines': num_lines(log)
                 }
             )
-            
+
             if type is LogFile.LogFileType.TUTOR:
                 match = self.ENGAGEMENT_ID_RGX.search(log.name)
                 if match:
@@ -217,7 +222,7 @@ class LogFileSerializer(ModelSerializer):
                     Q(repository=log_file.repository) & 
                     Q(type=type) & 
                     (Q(date=log_file.date) | Q(date__isnull=True))
-                ):
+                ).exclude(pk=log_file.pk).select_for_update():
                     with (
                         gzip.open(other_log.log.path, 'rb') as file1, 
                         gzip.open(log_file.log.path, 'rb') as file2
@@ -225,14 +230,11 @@ class LogFileSerializer(ModelSerializer):
                         if headers_match(file1, file2, min(other_log.num_lines, log_file.num_lines)):
                             if other_log.num_lines > log_file.num_lines:
                                 other_log, log_file = log_file, other_log
+                            if os.path.exists(other_log.log.path):
+                                os.remove(other_log.log.path)
                             other_log.delete()
 
             return log_file
-
-    def is_gzip(self, file):
-        is_gz = file.read(2) == b'\x1f\x8b'
-        file.seek(0)
-        return is_gz
 
     def compress_file(self, file: InMemoryUploadedFile):
         buffer = BytesIO()

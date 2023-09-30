@@ -1,43 +1,45 @@
+import base64
+import gzip
+import json
+import os
+import re
+import subprocess
+import time
 from collections.abc import MutableMapping
-from typing import Any
-from django.db import models
+from pathlib import Path
+from typing import Any, Optional, TextIO
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import (
+    serialization as crypto_serialization,
+)
+from cryptography.hazmat.primitives.asymmetric import padding
+from dateutil.parser import ParserError
+from dateutil.parser import parse as ts_parse
 from django.apps import apps
 from django.conf import settings
-from django_enum import EnumField
-from enum_properties import p, s
-from django_enum import TextChoices, IntegerChoices
+from django.contrib.auth.models import (
+    AbstractUser,
+    PermissionsMixin,
+    UserManager,
+)
+from django.core.exceptions import SuspiciousOperation, ValidationError
+from django.core.validators import MaxLengthValidator, MinLengthValidator
+from django.db import models
+from django.utils.functional import cached_property
+from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
-from polymorphic.models import PolymorphicModel
+from django_enum import EnumField, IntegerChoices, TextChoices
+from enum_properties import p, s
 from learn_python_server.utils import (
-    normalize_url,
     TemporaryDirectory,
     calculate_sha256,
-    num_lines
+    normalize_url,
+    num_lines,
 )
-from django.core.exceptions import ValidationError, SuspiciousOperation
-import subprocess
-import os
-from pathlib import Path
-import re
-import json
-from django.utils.timezone import now
-from django.utils.functional import cached_property
-from cryptography.hazmat.primitives import (
-    hashes,
-    serialization as crypto_serialization
-)
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.backends import default_backend
-from django.contrib.auth.models import AbstractUser, UserManager, PermissionsMixin
-from polymorphic.models import PolymorphicModel, PolymorphicManager
-import base64
-import time
-import gzip
-from typing import TextIO, Optional
-from dateutil.parser import parse as ts_parse
-from dateutil.parser import ParserError
-from django.core.validators import MinLengthValidator, MaxLengthValidator
+from polymorphic.models import PolymorphicManager, PolymorphicModel
 
 
 class Domain(IntegerChoices, s('url')):
@@ -92,6 +94,7 @@ class User(PolymorphicModel, AbstractUser, PermissionsMixin):
 
 class TutorBackend(TextChoices, p('uri')):
 
+    TEST    = 'test',   None
     OPEN_AI = 'openai', 'https://platform.openai.com/'
 
     def __str__(self):
@@ -100,8 +103,8 @@ class TutorBackend(TextChoices, p('uri')):
 
 class TutorRole(TextChoices, s('alt')):
     
-    SYSTEM = 'system', ['system']
-    TUTOR = 'tutor', ['assistant']
+    SYSTEM  = 'system',  ['system']
+    TUTOR   = 'tutor',   ['assistant']
     STUDENT = 'student', ['user']
 
 
@@ -163,7 +166,7 @@ def repo_guard(func):
     return wrapper
 
 
-class Repository(models.Model):
+class Repository:
     """
     A git repository. This is an abstract model that can be used to represent a git repository. It provides
     functions for cloning and retrieving basic information about the repo. The repository may be a specific
@@ -178,13 +181,11 @@ class Repository(models.Model):
     @staticmethod
     def is_valid(uri):
         return Repository.URI_RE.match(uri)
+    
+    uri: str = ''
 
-    uri = models.URLField(
-        max_length=255,
-        db_index=True,
-        unique=True,
-        help_text=_('The Git repository URI. This may be a specific branch (i.e. tree/branch_name)')
-    )
+    def __init__(self, uri):
+        self.uri = uri
 
     # repo execution context cache
     _cwd = None
@@ -291,6 +292,7 @@ class Repository(models.Model):
             ['poetry', 'config', 'virtualenvs.in-project', 'true']
         )
         self._in_context = True
+        return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         subprocess.check_output([
@@ -340,6 +342,19 @@ class Repository(models.Model):
         except json.JSONDecodeError:
             return do_get()
 
+
+class RepositoryModel(Repository, models.Model):
+
+    def __init__(self, *args, **kwargs):
+        models.Model.__init__(self, *args, **kwargs)
+
+    uri = models.URLField(
+        max_length=255,
+        db_index=True,
+        unique=True,
+        help_text=_('The Git repository URI. This may be a specific branch (i.e. tree/branch_name)')
+    )
+
     def __str__(self):
         return self.uri
 
@@ -376,7 +391,7 @@ class TutorAPIKey(models.Model):
         verbose_name_plural = _('Tutor API Keys')
 
 
-class CourseRepository(Repository):
+class CourseRepository(RepositoryModel):
     
     class Meta:
         verbose_name = _('Course Repository')
@@ -452,7 +467,9 @@ class Course(models.Model):
         return DocBuild.objects.filter(repository__repository=self.repository).latest('timestamp')
 
     def __str__(self):
-        return f'[ {self.name} ]: {self.repository.uri}'
+        if self.name:
+            return self.name
+        return self.repository.uri
     
     class Meta:
         ordering = ['-started']
@@ -467,20 +484,14 @@ class Enrollment(models.Model):
     repository = models.OneToOneField(
         'StudentRepository',
         on_delete=models.CASCADE,
-        null=True,
-        blank=True,
         related_name='enrollment'
     )
     joined = models.DateTimeField(default=datetime_now)
     last_activity = models.DateTimeField(null=True, blank=True)
 
-
-    def clean(self):
-        super().clean()
-        if self.repository and self.repository.student != self.student:
-            raise ValidationError({
-                'repository': _('Repository does not belong to student.')
-            })
+    def save(self, *args, **kwargs):
+        self.student = self.repository.student
+        super().save(*args, **kwargs)
 
     class Meta:
         unique_together = [('student', 'repository'), ('student', 'course')]
@@ -511,7 +522,7 @@ class StudentRepositoryManager(models.Manager):
         return super().create(**kwargs)
 
 
-class StudentRepository(Repository):
+class StudentRepository(RepositoryModel):
 
     student = models.ForeignKey(
         'Student',
@@ -905,17 +916,11 @@ class Assignment(models.Model):
 
 
 class LogFileManager(models.Manager):
-
-    def get_queryset(self):
-        return super().get_queryset().select_related(
-            'repository',
-            'repository__enrollment',
-            'repository__student'
-        )
+    pass
 
 
 _DEFAULT_REGEX = re.compile(
-    r'^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - '
+    r'^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{6}[+-]{1}\d{4}) - '
     r'(?P<logger>\w+) - (?:\[(?P<level_no>\d+)\])?(?P<level>\w+) - (?P<message>.*)'
 )
 
@@ -927,7 +932,11 @@ class LogFile(models.Model):
         
         UNKNOWN = 0, 'Unknown', None,           [_DEFAULT_REGEX]
         GENERAL = 1, 'General', 'learn_python', [_DEFAULT_REGEX]
-        TESTING = 2, 'Testing', 'testing',      [_DEFAULT_REGEX,]
+        TESTING = 2, 'Testing', 'testing',      [_DEFAULT_REGEX, 
+                                                 re.compile(r'\[(?P<result>[\w]+)\] (?P<identifier>learn_python/tests/[\w]+.py::test_[\w]+)'),
+                                                 re.compile(r'\[START\] (?P<start>[\w]+)'),
+                                                 re.compile(r'\[STOP\] (?P<stop>[\w]+)')
+                                                ]
         TUTOR   = 3, 'Tutor',   'delphi',       [_DEFAULT_REGEX]
 
         def unmarshall(self, params):
@@ -983,7 +992,7 @@ class LogFile(models.Model):
 
         def __init__(self, log_file):
             self.log_file = log_file
-            log_file = Path(log_file.path.path)
+            log_file = Path(log_file.log.path)
             if log_file.is_file():
                 if str(log_file).endswith('.gz'):
                     self.file_handle = gzip.open(log_file, 'rt', encoding='utf-8')
@@ -999,10 +1008,12 @@ class LogFile(models.Model):
             return self.next_line
         
         def __next__(self):
-            if self.file_handle is None or self.next_line is None:
+            # import ipdb
+            # ipdb.set_trace()
+            if self.file_handle is None or not self.next_line:
                 raise StopIteration
             
-            match = self.log_file.type.regexes.search(self.next_line)
+            match = self.log_file.type.regexes[0].search(self.next_line)
             if not match:
                 self.readline()
                 return {}
@@ -1016,22 +1027,24 @@ class LogFile(models.Model):
             params = match.groupdict()
             additional_params()
             params['line_begin'] = self.line_no
-            while next_line := self.readline() and self.next_line_match is None:
+            while (next_line := self.readline()) and self.next_line_match is None:
                 params.setdefault('message', '')
                 params['message'] += f'\n{next_line}'
                 additional_params()
             
             params['line_end'] = self.line_no
+            # import ipdb
+            # ipdb.set_trace()
             return self.log_file.type.unmarshall(params)
         
     def __iter__(self):
         return self.LogIterator(self)
     
     def __str__(self):
-        return f'{self.repository.uri}: {Path(self.log.path).relative_to(settings.MEDIA_ROOT)}'
+        return Path(self.log.path).name
 
     class Meta:
-        ordering = [('-date', '-uploaded_at')]
+        ordering = ('-date', '-uploaded_at')
         verbose_name = _('Log File')
         verbose_name_plural = _('Log Files')
         index_together = (('repository', 'sha256_hash'),)
@@ -1042,12 +1055,17 @@ class LogEvent(PolymorphicModel):
 
     class LogLevel(IntegerChoices, s('numeric'), s('alts')):
 
+        _symmetric_builtins_ = (s('label', case_fold=True),)
+
         NOTSET    = 0,  'NOTSET',   []
         DEBUG     = 10, 'DEBUG',    []
         INFO      = 20, 'INFO',     []
         WARN      = 30, 'WARN',     ['WARNING']
         ERROR     = 40, 'ERROR',    ['EXCEPTION']
         CRITICAL  = 50, 'CRITICAL', ['FATAL']
+
+        def __str__(self):
+            return self.label
 
         def __lt__(self, other):
             return self.value < other.value
@@ -1079,27 +1097,45 @@ class LogEvent(PolymorphicModel):
 
     class Meta:
         unique_together = [('timestamp', 'log')]
+        verbose_name = 'Log Event'
+        verbose_name_plural = 'Log Events'
 
 
 class TestEvent(LogEvent):
 
-    class Runner(IntegerChoices):
+    class Runner(IntegerChoices, s('alts', case_fold=True)):
 
-        STUDENT = 0, 'Student'
-        CI      = 1, 'Continuous Integration'
-        SERVER  = 2, 'Server'
+        _symmetric_builtins_ = (s('label', case_fold=True),)
 
-    class Result(IntegerChoices):
+        TUTOR   = 1, 'Tutor',                  ['delphi']
+        PYTEST  = 2, 'Pytest',                 ['test']
+        DOCS    = 3, 'Docs',                   ['doc', 'sphinx']
+        CI      = 4, 'Continuous Integration', ['ci']
+        SERVER  = 5, 'Server',                 []
 
-        PASS  = 0, 'Passed'
-        FAIL  = 1, 'Failed'
-        ERROR = 2, 'Errored'
-        SKIP  = 3, 'Skipped'
+        def __str__(self):
+            return self.label
+        
+    class Result(IntegerChoices, s('alts', case_fold=True)):
 
-    runner = EnumField(Runner, db_index=True)
+        _symmetric_builtins_ = (s('label', case_fold=True),)
+
+        PASSED   = 0, 'Passed',  ['pass']
+        FAILED   = 1, 'Failed',  ['fail', 'failure']
+        ERRORED  = 2, 'Errored', ['error']
+        SKIPPED  = 3, 'Skipped', ['skip']
+
+        def __str__(self):
+            return self.label
+        
+    runner = EnumField(Runner, db_index=True, null=True, default=None)
     result = EnumField(Result, db_index=True)
 
-    assignment = models.ManyToManyField(Assignment, related_name='events')
+    assignment = models.ForeignKey(
+        Assignment,
+        related_name='tests',
+        on_delete=models.CASCADE
+    )
 
     class Meta:
         ordering = ['-timestamp']

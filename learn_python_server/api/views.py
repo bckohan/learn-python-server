@@ -1,27 +1,24 @@
-from rest_framework.views import APIView
-from rest_framework.viewsets import GenericViewSet
-from rest_framework.mixins import (
-    CreateModelMixin,
-    UpdateModelMixin,
-    ListModelMixin,
-    RetrieveModelMixin,
-    DestroyModelMixin
-)
 from django.http import Http404
-from rest_framework.response import Response
 from learn_python_server.api.permissions import (
     CreateOrViewRepoItemPermission,
-    HasAuthorizedTutor
+    HasAuthorizedTutor,
+    IsEnrolled
 )
 from learn_python_server.api.serializers import (
+    LogFileSerializer,
     TutorEngagementSerializer,
-    LogFileSerializer
 )
-from learn_python_server.models import (
-    TutorEngagement,
-    Student,
-    LogFile
+from learn_python_server.models import LogFile, Student, TutorEngagement
+from rest_framework.mixins import (
+    CreateModelMixin,
+    DestroyModelMixin,
+    ListModelMixin,
+    RetrieveModelMixin,
+    UpdateModelMixin,
 )
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import GenericViewSet
 
 
 class AuthorizeTutorView(APIView):
@@ -44,7 +41,7 @@ class TutorEngagementViewSet(
 ):
 
     serializer_class = TutorEngagementSerializer
-    permission_classes = [CreateOrViewRepoItemPermission]
+    permission_classes = [CreateOrViewRepoItemPermission, IsEnrolled]
 
     def get_serializer_context(self):
         return {
@@ -86,7 +83,7 @@ class LogFileViewSet(
 ):
     
     serializer_class = LogFileSerializer
-    permission_classes = [CreateOrViewRepoItemPermission]
+    permission_classes = [CreateOrViewRepoItemPermission, IsEnrolled]
 
     def get_serializer_context(self):
         return {
@@ -103,8 +100,3 @@ class LogFileViewSet(
             ).distinct()
         return LogFile.objects.none()
     
-    # def create(self, request, *args, **kwargs):
-    #     import ipdb
-    #     ipdb.set_trace()
-    #     ret = super().create(request, *args, **kwargs)
-    #     return ret

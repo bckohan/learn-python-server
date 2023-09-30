@@ -1,8 +1,5 @@
+from learn_python_server.models import Student, StudentRepository
 from rest_framework import permissions
-from learn_python_server.models import (
-    Student,
-    StudentRepository
-)
 
 
 class IsAuthorizedRepository(permissions.BasePermission):
@@ -31,6 +28,18 @@ class IsRepositoryOwnerOrStaff(permissions.BasePermission):
         return obj.repository in StudentRepository.objects.filter(
             student__in=request.user.students.all()
         ) or obj.repository == request.user.authorized_repository
+
+
+class IsEnrolled(IsAuthorizedRepository):
+
+    def has_permission(self, request, view):
+        if super().has_permission(request, view):
+            return (
+                hasattr(request.user.authorized_repository, 'enrollment') and
+                request.user.authorized_repository.enrollment and
+                request.user.authorized_repository.enrollment.course.ended is None
+            )
+        return False
 
 
 class CreateOrViewRepoItemPermission(IsAuthorizedRepository, IsRepositoryOwnerOrStaff):

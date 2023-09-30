@@ -1,24 +1,25 @@
-from learn_python_server.models import (
-    DocBuild,
-    StudentRepository,
-    TutorEngagement,
-    LogFile
-)
+import os
+
+from django.conf import settings
+from django.db.models import Q
 from django.http import (
-    HttpResponseRedirect,
+    FileResponse,
+    Http404,
     HttpResponse,
     HttpResponseForbidden,
     HttpResponseNotFound,
+    HttpResponseRedirect,
     JsonResponse,
-    FileResponse
 )
-from django.http import Http404
-from django.conf import settings
-from learn_python_server.utils import normalize_repository
-from django.db.models import Q
-from django.views.generic import DetailView
-import os
 from django.utils.translation import gettext_lazy as _
+from django.views.generic import DetailView
+from learn_python_server.models import (
+    DocBuild,
+    LogFile,
+    StudentRepository,
+    TutorEngagement,
+)
+from learn_python_server.utils import normalize_repository
 
 
 def course_docs(request, course):
@@ -34,9 +35,6 @@ def course_docs(request, course):
 
 def repository_docs(request, repository):
     qry = Q(repository__repository__uri=repository)
-    if repository.isdigit():
-        qry |= Q(repository__repository__id=int(repository))
-    
     docs = DocBuild.objects.filter(qry).order_by('-timestamp').first()
     if docs:
         return HttpResponseRedirect(redirect_to=docs.url)
