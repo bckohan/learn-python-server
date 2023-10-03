@@ -123,7 +123,7 @@ def get_log(request, log_name):
         raise Http404() from err
 
 
-class TutorEngagementDetailView(DetailView):
-    model = TutorEngagement
-    template_name = 'learn_python_server/engagement_detail.html'
-    context_object_name = 'engagement'
+class StudentRepositoryTimelineView(DetailView):
+    model = StudentRepository
+    template_name = 'learn_python_server/student_repository_timeline.html'
+    context_object_name = 'repository'

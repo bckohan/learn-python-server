@@ -23,9 +23,10 @@ from learn_python_server.api.views import (
     AuthorizeTutorView,
     LogFileViewSet,
     TutorEngagementViewSet,
+    TimelineViewSet
 )
 from learn_python_server.views import (
-    TutorEngagementDetailView,
+    StudentRepositoryTimelineView,
     course_docs,
     get_log,
     redirect_latest_docs,
@@ -59,8 +60,12 @@ urlpatterns = [
     path('register/<url:repository>', register, name='register'),
     path('api/authorize_tutor', AuthorizeTutorView.as_view(), name='authorize_tutor'),
     path('api/', include(router.urls)),
+    path('api/timeline', TimelineViewSet.as_view(), name='timeline'),
+    path('api/timeline/<url:repository>', TimelineViewSet.as_view(), name='timeline'),
+    path('api/timeline/<int:repository>', TimelineViewSet.as_view(), name='timeline'),
     path('media/log_uploads/<str:log_name>', get_log, name='get_log'),
-    path('tutor_engagement/<uuid:pk>', TutorEngagementDetailView.as_view(), name='tutor_engagement_detail'),
+    path('timeline/<url:repository>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
+    path('timeline/<int:repository>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
     path('admin/', admin.site.urls)
 ]
 

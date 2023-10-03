@@ -33,7 +33,7 @@
 Learn Python Server
 ###################
 
-This is the companion course server to the learn-python_ class. It's build using the Django_ framework
+This is the companion course server to the learn-python_ class. It's built using the Django_ framework
 and allows progress and error tracking for student repositories as they work through the course. It can
 also be used to automate grading.
 
@@ -51,6 +51,6 @@ Security Considerations
 This server occasionally runs untrusted code. Additional configuration can be done to make sure that
 untrusted code is always run in a secure VM - but this is not the default. Only students that are
 registered and enrolled will have their repository code run so be careful who you allow to register
-and enroll.
+and enroll and never run this server next to sensitive assets.
 
 TODO

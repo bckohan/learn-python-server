@@ -3,7 +3,7 @@ name = "learn-python-server"
 version = "0.1.0"
 description = "Server tools for running a learn-python class."
 authors = ["Brian Kohan <bckohan@gmail.com>"]
-readme = "README.md"
+readme = "README.rst"
 license = "MIT"
 packages = [{include = "learn_python_server"}]
 classifiers = [
@@ -40,6 +40,7 @@ cryptography = "^41.0.3"
 markdown = "^3.4.4"
 djangorestframework = "^3.14.0"
 python-dateutil = "^2.8.2"
+django-rest-polymorphic = "^0.1.10"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "^8.13.2"

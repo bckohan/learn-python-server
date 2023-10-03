@@ -4,8 +4,7 @@
 {% block submit_buttons_bottom %}
 <div class="submit-row">
     <input type="submit" value="{% trans 'Save' %}" class="default" name="_save" />
-    <button name="_build-docs" id="build-docs">{% trans 'Rebuild Docs' %}</button>
-    <button name="_goto-docs" id="goto-docs" onclick="navigateToDocs(event);">{% trans 'Goto Docs' %}</button>
+    <button name="_process-log" id="process-log">{% if original.processed %}{% trans 'Re-Process' %}{% else %}{% trans 'Process' %}{% endif %}</button>
     <style>
         div.submit-row button {
             cursor: pointer;
@@ -26,12 +25,7 @@
     </style>
     {% if original.pk %}
     <script>
-        function navigateToDocs(event) {
-            event.preventDefault(); // This will prevent the default form action
-            location.href = '{% url "course_docs" original.pk|admin_urlquote %}';
-        };
-
-        $('#build-docs').click(function (event) {
+        $('#process-log').click(function (event) {
             event.preventDefault();
             const button = $(this);
 
@@ -41,11 +35,11 @@
 
             // Perform the AJAX request
             $.ajax({
-                url: '{% url opts|admin_urlname:"build-docs" original.pk|admin_urlquote %}',
+                url: '{% url opts|admin_urlname:"process-log" original.pk|admin_urlquote %}',
                 type: 'GET',
                 success: function (data) {
                     // Handle success
-                    button.text("{% trans 'Rebuild Docs' %}");
+                    button.text("{% trans 'Re-Process' %}");
                     document.body.style.cursor = 'default';
                     if (data.redirect) {
                         window.location.href = data.redirect;
@@ -62,10 +56,3 @@
     {% endif %}
 </div>
 {% endblock %}
-
-<!-- {% block object-tools-items %}
-    <li>
-        <a href="{% url opts|admin_urlname:'build-docs' original.pk|admin_urlquote %}" class="historylink">Rebuild Docs</a>
-    </li>
-    {{ block.super }}
-{% endblock %} -->

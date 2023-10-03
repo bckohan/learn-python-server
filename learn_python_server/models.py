@@ -37,6 +37,10 @@ from learn_python_server.utils import TemporaryDirectory, normalize_url
 from polymorphic.models import PolymorphicManager, PolymorphicModel
 
 
+def NON_POLYMORPHIC_CASCADE(collector, field, sub_objs, using):
+    return models.CASCADE(collector, field, sub_objs.non_polymorphic(), using)
+
+
 class Domain(IntegerChoices, s('url')):
 
     GITHUB = 0, 'github', 'https://github.com'
@@ -742,6 +746,21 @@ class Student(User):
         verbose_name_plural = _('Students')
 
 
+class TimelineEvent(PolymorphicModel):
+
+    timestamp = models.DateTimeField(null=False, db_index=True)
+    repository = models.ForeignKey(
+        'StudentRepository',
+        on_delete=models.CASCADE,
+        related_name='timeline_events'
+    )
+
+    class Meta:
+        ordering = ('-timestamp',)
+        index_together = [('timestamp', 'repository')]
+        unique_together = [('timestamp', 'repository')]
+
+
 class TutorExchange(models.Model):
 
     role = EnumField(TutorRole)
@@ -765,11 +784,32 @@ class TutorExchange(models.Model):
         ordering = ('timestamp',)
 
 
-class TutorSession(models.Model):
+class ToolRun(TimelineEvent):
+
+    class Tools(TextChoices, s('alt')):
+
+        _symmetric_builtins_ = [
+            s('name', case_fold=True),
+            s('label', case_fold=True)
+        ]
+
+        TUTOR  = 'tutor',  'tutor',  ['delphi']
+        PYTEST = 'pytest', 'pytest', []
+        DOCS   = 'docs',   'docs',   []
+    
+    stop = models.DateTimeField(null=False)
+
+    tool = EnumField(Tools, strict=False, db_index=True)
+
+    @property
+    def start(self):
+        return self.timestamp
+
+
+class TutorSession(TimelineEvent):
     
     session_id = models.PositiveSmallIntegerField(null=False, db_index=True)
-    start = models.DateTimeField(null=False, db_index=True)
-    end = models.DateTimeField(null=False)
+    stop = models.DateTimeField(null=False)
 
     engagement = models.ForeignKey(
         'TutorEngagement',
@@ -785,7 +825,6 @@ class TutorSession(models.Model):
     )
 
     class Meta:
-        ordering = ['start']
         unique_together = [('engagement', 'session_id')]
         verbose_name = _('Tutor Session')
         verbose_name_plural = _('Tutor Sessions')
@@ -794,11 +833,9 @@ class TutorSession(models.Model):
         return str(self.session_id)
 
 
-class TutorEngagement(models.Model):
+class TutorEngagement(ToolRun):
 
-    id = models.UUIDField(primary_key=True)
-    start = models.DateTimeField(null=False, db_index=True)
-    end = models.DateTimeField(null=False)
+    engagement_id = models.UUIDField(null=False, unique=True)
 
     tz_name = models.CharField(max_length=64, default='')
     tz_offset = models.SmallIntegerField(null=True, default=None)
@@ -813,14 +850,11 @@ class TutorEngagement(models.Model):
 
     backend = EnumField(TutorBackend)
     backend_extra = models.JSONField(null=True, blank=True)
-
-    repository = models.ForeignKey('StudentRepository', on_delete=models.CASCADE)
-
+        
     def __str__(self):
-        return str(self.id)
+        return f'[{self.timestamp}] {self.repository.student.display}'
 
     class Meta:
-        ordering = ['-start']
         verbose_name = _('Tutor Engagement')
         verbose_name_plural = _('Tutor Engagements')
 
@@ -1003,8 +1037,6 @@ class LogFile(models.Model):
             return self.next_line
         
         def __next__(self):
-            # import ipdb
-            # ipdb.set_trace()
             if self.file_handle is None or not self.next_line:
                 raise StopIteration
             
@@ -1028,8 +1060,6 @@ class LogFile(models.Model):
                 additional_params()
             
             params['line_end'] = self.line_no
-            # import ipdb
-            # ipdb.set_trace()
             return self.log_file.type.unmarshall(params)
         
     def __iter__(self):
@@ -1046,7 +1076,7 @@ class LogFile(models.Model):
         unique_together = (('repository', 'sha256_hash'),)
 
 
-class LogEvent(PolymorphicModel):
+class LogEvent(TimelineEvent):
 
     class LogLevel(IntegerChoices, p('color'), s('alts')):
 
@@ -1074,7 +1104,6 @@ class LogEvent(PolymorphicModel):
         def __gte__(self, other):
             return self.value >= other.value
 
-    timestamp = models.DateTimeField(null=False, db_index=True)
     level = EnumField(LogLevel, db_index=True, strict=False)
 
     line_begin = models.PositiveIntegerField()
@@ -1082,7 +1111,7 @@ class LogEvent(PolymorphicModel):
 
     log = models.ForeignKey(
         LogFile,
-        on_delete=models.CASCADE,
+        on_delete=NON_POLYMORPHIC_CASCADE,
         related_name='events',
         null=True,
         default=None
@@ -1091,7 +1120,6 @@ class LogEvent(PolymorphicModel):
     logger = models.CharField(null=False, blank=True, default='', max_length=128)
 
     class Meta:
-        unique_together = [('timestamp', 'log')]
         verbose_name = 'Log Event'
         verbose_name_plural = 'Log Events'
 

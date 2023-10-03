@@ -14,7 +14,7 @@ from django.core.management import call_command
 from django.db.models import Count
 from django.db.models.query import QuerySet
 from django.http.request import HttpRequest
-from django.http.response import HttpResponseRedirect
+from django.http.response import HttpResponseRedirect, HttpResponse
 from django.urls import path, reverse
 from django.utils.html import format_html, mark_safe
 from django.utils.timezone import localtime
@@ -39,6 +39,7 @@ from learn_python_server.models import (
     TutorExchange,
     TutorSession,
     User,
+    TimelineEvent
 )
 
 
@@ -307,6 +308,7 @@ class TutorExchangeAdmin(ReadOnlyMixin, admin.ModelAdmin):
 class TutorExchangeInlineAdmin(ReadOnlyMixin, admin.TabularInline):
     model = TutorExchange
     extra = 0
+    fk_name = 'session'
 
     fields = ('exchange', 'role', 'content')
     readonly_fields = ('exchange',)
@@ -323,7 +325,7 @@ class TutorExchangeInlineAdmin(ReadOnlyMixin, admin.TabularInline):
 @admin.register(TutorSession)
 class TutorSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
     
-    list_display = ('engagement', 'start', 'end', 'assignment', 'num_exchanges')
+    list_display = ('engagement', 'timestamp', 'stop', 'assignment', 'num_exchanges')
     search_fields = (
         'engagement__repository__student__full_name',
         'engagement__repository__student__email',
@@ -354,8 +356,9 @@ class TutorSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
 class TutorSessionInlineAdmin(ReadOnlyMixin, admin.TabularInline):
     model = TutorSession
     extra = 0
+    fk_name = 'engagement'
 
-    fields = ('session', 'start', 'end', 'assignment', 'num_exchanges')
+    fields = ('session', 'timestamp', 'stop', 'assignment', 'num_exchanges')
     readonly_fields = ('session', 'num_exchanges')
 
     def has_delete_permission(self, request, obj=None):
@@ -370,16 +373,20 @@ class TutorSessionInlineAdmin(ReadOnlyMixin, admin.TabularInline):
     def num_exchanges(self, instance):
         return instance.num_exchanges
 
-    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+    def get_queryset(self, request):
         return super().get_queryset(request).select_related(
-            'assignment'
-        ).prefetch_related('exchanges').annotate(num_exchanges=Count('exchanges'))
+            'assignment',
+            'assignment__module',
+            'engagement'
+        ).prefetch_related(
+            'exchanges'
+        ).annotate(num_exchanges=Count('exchanges'))
 
 
 @admin.register(TutorEngagement)
 class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
-    list_display = ('student', 'start', 'sessions', 'tasks', 'duration', 'view', 'log_file')
+    list_display = ('student', 'timestamp', 'sessions', 'tasks', 'duration', 'log_file')
     search_fields = (
         'repository__student__full_name',
         'repository__student__email',
@@ -395,17 +402,10 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
     
     def student(self, obj):
         return obj.repository.student.display
-    
-    def view(self, obj):
-        return format_html(
-            '<a href="{url}" target="_blank">view</a>',
-            url=reverse('tutor_engagement_detail', kwargs={'pk': obj.pk})
-        )
-
 
     def duration(self, obj):
-        if obj.end:
-            return obj.end - obj.start
+        if obj.stop:
+            return obj.stop - obj.timestamp
         
     def sessions(self, obj):
         return obj.sessions.count()
@@ -418,15 +418,17 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(
             'repository',
-            'repository__student'
+            'repository__student',
+            'log'
         ).prefetch_related('sessions').annotate(tasks=Count('sessions__assignment', unique=True))
 
     def has_delete_permission(self, request, obj=None):
         return True
     
     def log_file(self, obj):
-        url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
-        return format_html('<a href="{}">{}</a>', url, obj.log.log.name)
+        if obj.log:
+            url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
+            return format_html('<a href="{}">{}</a>', url, os.path.basename(obj.log.log.name))
     
     log_file.short_description = _('Log File')
 
@@ -434,7 +436,7 @@ class TutorEngagementAdmin(ReadOnlyMixin, admin.ModelAdmin):
 @admin.register(LogFile)
 class LogFileAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
-    list_display = ('student', 'date', 'repository', 'type', 'log', 'uploaded_at', 'num_lines', 'processed')
+    list_display = ('student', 'date', 'type', 'log', 'uploaded_at', 'num_lines', 'processed')
     search_fields = (
         'repository__student__full_name',
         'repository__student__email',
@@ -445,6 +447,7 @@ class LogFileAdmin(ReadOnlyMixin, admin.ModelAdmin):
         'type',
         'processed'
     )
+    change_form_template = 'admin/logfile_change_form.html'
     
     def student(self, obj):
         return obj.repository.student.display
@@ -460,9 +463,30 @@ class LogFileAdmin(ReadOnlyMixin, admin.ModelAdmin):
     
     def log_file(self, obj):
         url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
-        return format_html('<a href="{}">{}</a>', url, obj.log.name)
+        return format_html('<a href="{}">{}</a>', url, os.path.basename(obj.log.name))
     
     log_file.short_description = _('Log File')
+
+    def get_urls(self):
+        urls = super().get_urls()
+        my_urls = [
+            path('<object_id>/process_log/', self.admin_site.admin_view(self.process_log), name='learn_python_server_logfile_process-log'),
+        ]
+        return my_urls + urls
+
+    def process_log(self, request, object_id):
+        log = LogFile.objects.get(pk=object_id)
+        call_command('process_logs', [log.pk], reset=True)
+        self.message_user(request, f'{os.path.basename(log.log.name)} log was processed.')
+        return HttpResponse(status=200)
+    
+    def process_logs(self, request, queryset):
+        call_command('process_logs', [log.pk for log in queryset], reset=True)
+        self.message_user(request, f'{queryset.count()} logs were processed.')
+    
+    process_logs.short_description = "(Re)Process Logs"
+
+    actions = [process_logs]
 
 
 @admin.register(LogEvent)
@@ -493,6 +517,9 @@ class LogEventAdmin(ReadOnlyMixin, admin.ModelAdmin):
         )
     
     log_file.short_description = _('Log')
+
+    def has_delete_permission(self, request, obj=None):
+        return True
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(
@@ -539,5 +566,12 @@ class TestEventAdmin(LogEventAdmin):
         return format_html(f'<div style="font-weight: bold;text-align: center; background-color: {obj.result.color};color: white;">{str(obj.result).upper()}</div>')
 
     result_colored.short_description = 'Result'
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
+        return super().get_queryset(request).select_related(
+            'log__repository',
+            'log__repository__student',
+            'assignment'
+        ).prefetch_related('assignment__module')
 
 admin.register(TutorAPIKey)(admin.ModelAdmin)

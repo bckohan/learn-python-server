@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import os
 from pathlib import Path
-
+from logging import Filter
 from split_settings.tools import include, optional
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -219,3 +219,95 @@ else:
     
     # you can override security settings by providing this file
     include(optional(BASE_DIR / 'security.py'))
+
+
+
+class SquelchStackTraces(Filter):
+
+    def filter(self, record):
+        record.exc_info = None
+        return super().filter(record)
+
+LOG_TO_CONSOLE = bool(int(os.environ.get('LP_LOG_TO_CONSOLE', '0')))
+LOG_DIR = BASE_DIR / 'logs'
+
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_LEVEL = 'DEBUG' if DEBUG else 'INFO'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'level': LOG_LEVEL,
+            'class': 'logging.StreamHandler',
+            'formatter': 'msg_only',
+        },
+        'file': {
+            'level': LOG_LEVEL,
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': LOG_DIR / 'learn_python_server.log',
+            'when': 'midnight',
+            'interval': 1,
+            'backupCount': 14,  # keep last 14 days of logs
+            'formatter': 'verbose' if DEBUG else 'simple'
+        },
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler',
+            'include_html': True
+        }
+    },
+    'formatters': {
+        'verbose': {
+            'format': '%(levelname)s %(asctime)s %(name)s %(process)d %(thread)d %(message)s'
+        },
+        'simple': {
+            'format': '%(levelname)s %(asctime)s %(name)s %(message)s'
+        },
+        'msg_only': {
+            'format': '%(message)s'
+        }
+    },
+    'filters': {
+        'squelch_traces': {
+            '()': 'learn_python_server.settings.SquelchStackTraces',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['file'] + ['console'] if LOG_TO_CONSOLE else [],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['file'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.utils.autoreload': {
+            'handlers': ['file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.template': {
+            'handlers': ['file'],
+            'filters': ['squelch_traces'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+        'core.middleware.RequestLogger': {
+            'handlers': ['file'] + ['console'] if LOG_TO_CONSOLE else [],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        }
+    },
+    'root': {
+        'handlers': ['file', 'mail_admins'] + ['console'] if LOG_TO_CONSOLE else [],
+        'level': LOG_LEVEL
+    },
+
+}
+
+include(optional(BASE_DIR / 'logging.py'))

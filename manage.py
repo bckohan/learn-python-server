@@ -7,6 +7,8 @@ import sys
 def main():
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'learn_python_server.settings')
+    os.environ['LP_LOG_TO_CONSOLE'] = '1'
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

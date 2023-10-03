@@ -7,8 +7,16 @@ from learn_python_server.api.permissions import (
 from learn_python_server.api.serializers import (
     LogFileSerializer,
     TutorEngagementSerializer,
+    TimelinePolymorphicSerializer
 )
-from learn_python_server.models import LogFile, Student, TutorEngagement
+from learn_python_server.models import (
+    LogFile,
+    Student,
+    TutorEngagement,
+    TimelineEvent,
+    StudentRepository
+)
+from rest_framework.permissions import IsAdminUser
 from rest_framework.mixins import (
     CreateModelMixin,
     DestroyModelMixin,
@@ -17,9 +25,14 @@ from rest_framework.mixins import (
     UpdateModelMixin,
 )
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
+from rest_framework.generics import ListAPIView
+from django.db.models import Q
+import logging
 
+api_logger = logging.getLogger('learn_python_server.api')
 
 class AuthorizeTutorView(APIView):
 
@@ -30,6 +43,23 @@ class AuthorizeTutorView(APIView):
             'tutor': request.user.authorized_repository.get_tutor_key().backend.value,
             'secret': request.user.authorized_repository.get_tutor_key().secret,
         })
+    
+
+class LogValidationErrors:
+
+    def create(self, request, *args, **kwargs):
+        try:
+            super().create(request, *args, **kwargs)
+        except ValidationError:
+            api_logger.exception('create() error')
+            raise
+
+    def update(self, request, *args, **kwargs):
+        try:
+            super().update(request, *args, **kwargs)
+        except ValidationError:
+            api_logger.exception('update() error')
+            raise
 
 
 class TutorEngagementViewSet(
@@ -42,6 +72,8 @@ class TutorEngagementViewSet(
 
     serializer_class = TutorEngagementSerializer
     permission_classes = [CreateOrViewRepoItemPermission, IsEnrolled]
+
+    lookup_field = 'engagement_id'
 
     def get_serializer_context(self):
         return {
@@ -60,18 +92,22 @@ class TutorEngagementViewSet(
     
     def create(self, request, *args, **kwargs):
         try:
-            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-            self.kwargs = {
-                **self.kwargs,
-                lookup_url_kwarg: request.data['id']
-            }
-            return self.update(
-                request,
-                *args,
-                **self.kwargs
-            )
-        except Http404:
-            return super().create(request, *args, **kwargs)
+            try:
+                lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+                self.kwargs = {
+                    **self.kwargs,
+                    lookup_url_kwarg: request.data['engagement_id']
+                }
+                return self.update(
+                    request,
+                    *args,
+                    **self.kwargs
+                )
+            except Http404:
+                return super().create(request, *args, **kwargs)
+        except ValidationError:
+            api_logger.exception('TutorEngagementViewSet::create() error')
+            raise
 
 
 class LogFileViewSet(
@@ -100,3 +136,44 @@ class LogFileViewSet(
             ).distinct()
         return LogFile.objects.none()
     
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except ValidationError:
+            api_logger.exception('LogFileViewSet::create() validation error')
+            raise
+    
+
+class TimelineViewSet(ListAPIView):
+
+    serializer_class = TimelinePolymorphicSerializer
+
+    def get_queryset(self):
+        repository = self.kwargs.get('repository', None)
+        timeline_q = Q()
+        if repository is not None:
+            if repository.isdigit():
+                qry = Q(id=int(repository))
+            else:
+                qry = Q(uri=repository)
+            try:
+                repository = StudentRepository.objects.get(qry)
+                if not self.request.user.is_staff or self.request.user.is_superuser:
+                    if not((
+                        repository in StudentRepository.objects.filter(
+                            student__in=self.request.user.students.all()
+                        )
+                    ) or (
+                        repository == self.request.user.authorized_repository
+                    )):
+                        raise PermissionDenied()
+                timeline_q = Q(repository=repository)
+            except StudentRepository.DoesNotExist:
+                raise Http404()
+        elif not self.request.user.is_superuser or self.request.user.is_staff:
+            raise PermissionDenied()
+        return TimelineEvent.objects.filter(
+            timeline_q
+        ).select_related(
+            'repository'
+        ).filter(user=self.request.user)

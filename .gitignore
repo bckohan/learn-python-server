@@ -168,3 +168,4 @@ poetry.lock
 **/media/
 **/.DS_Store
 *.sqlite3
+logs/

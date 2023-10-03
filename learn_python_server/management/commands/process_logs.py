@@ -1,16 +1,17 @@
-import re
 import readline  # don't remove, this helps input() work better
-import shutil
-from pathlib import Path
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Q
-from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
-from learn_python_server.models import Assignment, LogEvent, LogFile, TestEvent
-from learn_python_server.utils import TemporaryDirectory
+from learn_python_server.models import (
+    Assignment,
+    LogEvent,
+    LogFile,
+    TestEvent,
+    ToolRun
+)
 
 
 class Command(BaseCommand):
@@ -26,6 +27,13 @@ class Command(BaseCommand):
     }
 
     def add_arguments(self, parser):
+        parser.add_argument(
+            'logs',
+            metavar='L',
+            type=int,
+            nargs='*', 
+            help='The ids of the log file(s) to process.'
+        )
 
         parser.add_argument(
             '--level',
@@ -57,15 +65,6 @@ class Command(BaseCommand):
             )
         )
 
-        filter_group.add_argument(
-            '--log',
-            dest='log',
-            type=int,
-            help=_(
-                'The id of the log to process.'
-            )
-        )
-
     def handle(self, **options):
         with transaction.atomic():
             qry = Q()
@@ -73,15 +72,21 @@ class Command(BaseCommand):
                 qry &= Q(processed=False)
             if options['repository']:
                 qry &= Q(repository__id=options['repository'])
-            if options['log']:
-                qry &= Q(id=options['log'])
+            if options['logs']:
+                qry &= Q(id__in=[int(lg) for lg in options['logs']])
             logs = LogFile.objects.filter(qry)
             if options['reset']:
-                TestEvent.objects.filter(log__in=logs).delete()
-                LogEvent.objects.filter(log__in=logs).delete()
+                count = TestEvent.objects.filter(log__in=logs).delete()[1].get('learn_python_server.TestEvent', 0)
+                if count:
+                    self.stdout.write(self.style.ERROR(_('{} test events were deleted').format(count)))
+                count = LogEvent.objects.filter(log__in=logs).delete()[1].get('learn_python_server.LogEvent', 0)
+                if count:
+                    self.stdout.write(self.style.ERROR(_('{} log events were deleted').format(count)))
             for log_file in LogFile.objects.filter(qry).select_for_update():
                 events = self.process_log(log_file, options['level'])
-                self.stdout.write(self.style.SUCCESS(_('{} were processed from {}').format(events, log_file)))
+                self.stdout.write(
+                    self.style.SUCCESS(_('{} were processed from {}').format(events, log_file))
+                )
                 log_file.processed = True
                 log_file.save()
 
@@ -103,11 +108,17 @@ class Command(BaseCommand):
                     # (will have to look at the previous day's log) and read backwards
                     # until stack is empty
                     if 'start' in log_record:
-                        runner_stack.append(log_record['start'])
+                        runner_stack.append((log_record['start'], log_record['timestamp']))
                         continue
                     if 'stop' in log_record:
-                        if runner_stack and runner_stack[-1] == log_record['stop']:
-                            runner_stack.pop()
+                        if runner_stack and runner_stack[-1][0] == log_record['stop']:
+                            tool_start = runner_stack.pop()
+                            ToolRun.objects.get_or_create(
+                                tool=tool_start[0],
+                                timestamp=tool_start[1],
+                                stop=log_record['timestamp'],
+                                repository=log_file.repository
+                            )
                         continue
                     if 'result' in log_record and 'identifier' in log_record:
                         log_record['assignment'] = Assignment.objects.filter(
@@ -117,7 +128,7 @@ class Command(BaseCommand):
                         if log_record['assignment']:
                             EventType = TestEvent
                             if runner_stack:
-                                log_record['runner'] = runner_stack[0]
+                                log_record['runner'] = runner_stack[0][0]
                     else:
                         continue
                 try:
@@ -127,7 +138,8 @@ class Command(BaseCommand):
                             for key, value in log_record.items()
                             if key in self.FIELD_NAMES[EventType]
                         },
-                        log=log_file
+                        log=log_file,
+                        repository=log_file.repository
                     )
                 except Exception as e:
                     self.stderr.write(self.style.ERROR(_('Error processing log record: {}').format(e)))

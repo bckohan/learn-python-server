@@ -17,6 +17,11 @@ from learn_python_server.models import (
     TutorEngagement,
     TutorExchange,
     TutorSession,
+    ToolRun,
+    TimelineEvent,
+    TestEvent,
+    LogEvent,
+    Module
 )
 from learn_python_server.utils import (
     calculate_sha256,
@@ -24,7 +29,12 @@ from learn_python_server.utils import (
     is_gzip,
     num_lines,
 )
-from rest_framework.serializers import CharField, IntegerField, ModelSerializer
+from rest_framework.serializers import (
+    CharField,
+    IntegerField,
+    ModelSerializer
+)
+from rest_polymorphic.serializers import PolymorphicSerializer
 
 
 class StudentSerializer(ModelSerializer):
@@ -91,6 +101,8 @@ class TutorSessionSerializer(ModelSerializer):
         exchanges = validated_data.pop('exchanges', [])
         assignment = validated_data.pop('assignment', {})
         session = TutorSession.objects.get_or_create(
+            timestamp=validated_data.pop('timestamp'),
+            repository=validated_data.pop('repository'),
             session_id=validated_data.pop('session_id'),
             engagement=validated_data.pop('engagement'),
             defaults={
@@ -109,7 +121,7 @@ class TutorSessionSerializer(ModelSerializer):
 
     class Meta:
         model = TutorSession
-        fields = ('id', 'engagement', 'session_id', 'start', 'end', 'assignment', 'exchanges')
+        fields = ('id', 'engagement', 'session_id', 'timestamp', 'stop', 'assignment', 'exchanges')
         read_only_fields = ('id', 'engagement')
 
 
@@ -117,6 +129,8 @@ class TutorEngagementSerializer(ModelSerializer):
 
     sessions = TutorSessionSerializer(many=True, read_only=False)
     repository = CharField(source='repository.uri', read_only=True)
+
+    tool = CharField(read_only=True)
 
     def update(self, instance, validated_data):
         return self.create(validated_data)
@@ -126,12 +140,15 @@ class TutorEngagementSerializer(ModelSerializer):
             sessions = validated_data.pop('sessions', [])
             engagement = TutorEngagement.objects.get_or_create(
                 **validated_data,
-                repository=self.context['request'].user.authorized_repository
+                repository=self.context['request'].user.authorized_repository,
+                tool=TutorEngagement.Tools.TUTOR
             )[0]
             sessions_field = self.get_fields()['sessions']
             sessions_field.create([
                 {
-                    **session, 'engagement': engagement,
+                    **session,
+                    'engagement': engagement,
+                    'repository': self.context['request'].user.authorized_repository,
                     'student': self.context['request'].user
                 } for session in sessions
             ])
@@ -168,8 +185,6 @@ class LogFileSerializer(ModelSerializer):
     LOG_NAME_DATE_RGX = re.compile(r'(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})')
 
     def create(self, validated_data):
-        # import ipdb
-        # ipdb.set_trace()
         with transaction.atomic():
             log = validated_data.get('log')
             if log:
@@ -254,3 +269,92 @@ class LogFileSerializer(ModelSerializer):
         model = LogFile
         fields = ('id', 'sha256_hash', 'repository', 'type', 'log', 'date', 'processed')
         read_only_fields = ('id', 'sha256_hash', 'repository', 'type', 'processed')
+
+
+class TimelineEventSerializer(ModelSerializer):
+
+    repository = CharField(source='repository.uri', read_only=True)
+
+    class Meta:
+        model = TimelineEvent
+        fields = ('id', 'timestamp', 'repository')
+        read_only_fields = fields
+
+class ToolRunSerializer(TimelineEventSerializer):
+    
+    class Meta:
+        model = ToolRun
+        fields = (*TimelineEventSerializer.Meta.fields, 'tool', 'stop')
+        read_only_fields = fields
+
+
+class TutorEngagementTLSerializer(ToolRunSerializer):
+
+    class Meta:
+        model = TutorEngagement
+        fields = (*ToolRunSerializer.Meta.fields, 'log', 'engagement_id', 'backend')
+        read_only_fields = fields
+
+
+class ModuleTLSerializer(ModelSerializer):
+
+    class Meta:
+        model = Module
+        fields = ('id', 'number', 'name', 'topic')
+        read_only_fields = fields
+
+
+class AssignmentTLSerializer(ModelSerializer):
+
+    module = ModuleTLSerializer(read_only=True)
+
+    class Meta:
+        model = Assignment
+        fields = ('id', 'module', 'number', 'name', 'identifier')
+        read_only_fields = fields
+
+
+class TutorExchangeTLSerializer(ModelSerializer):
+
+    class Meta:
+        model = TutorExchange
+        fields = ('id', 'role', 'content', 'timestamp', 'is_function_call')
+        read_only_fields = fields
+
+
+class TutorSessionTLSerializer(TimelineEventSerializer):
+
+    assignment = AssignmentTLSerializer(read_only=True)
+    exchanges = TutorExchangeTLSerializer(many=True, read_only=False)
+
+    class Meta:
+        model = TutorSession
+        fields = (*TimelineEventSerializer.Meta.fields, 'timestamp', 'stop', 'session_id', 'assignment')
+        read_only_fields = fields
+
+
+class LogEventSerializer(TimelineEventSerializer):
+    
+    class Meta:
+        model = LogEvent
+        fields = (*TimelineEventSerializer.Meta.fields, 'level', 'message')
+        read_only_fields = fields
+
+
+class TestEventSerializer(LogEventSerializer):
+        
+    class Meta:
+        model = TestEvent
+        fields = (*LogEventSerializer.Meta.fields, 'identifier', 'result')
+        read_only_fields = fields
+
+
+class TimelinePolymorphicSerializer(PolymorphicSerializer):
+    model_serializer_mapping = {
+        TimelineEvent: TimelineEventSerializer,
+        ToolRun: ToolRunSerializer,
+        TutorEngagement: TutorEngagementTLSerializer,
+        TutorSession: TutorSessionTLSerializer,
+        LogEvent: LogEventSerializer,
+        TestEvent: TestEventSerializer
+    }
