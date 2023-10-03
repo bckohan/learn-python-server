@@ -224,7 +224,7 @@ class LogFileSerializer(ModelSerializer):
                 match = self.ENGAGEMENT_ID_RGX.search(log.name)
                 if match:
                     try:
-                        engagement = TutorEngagement.objects.get(id=UUID(match.group(0)))
+                        engagement = TutorEngagement.objects.get(engagement_id=UUID(match.group(0)))
                         engagement.log = log_file
                         engagement.save()
                         log_file.date = engagement.start.date()
