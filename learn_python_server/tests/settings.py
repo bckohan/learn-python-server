@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 from django.test import SimpleTestCase
-#from split_settings.tools import include, optional
 import importlib
 
 os.environ.setdefault('LEARN_PYTHON_RDBMS', 'postgres')
