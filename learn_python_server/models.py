@@ -1088,7 +1088,7 @@ class LogEvent(PolymorphicModel):
         default=None
     )
     message = models.TextField(null=False, blank=True, default='')
-    logger = models.CharField(null=False, blank=True, default='')
+    logger = models.CharField(null=False, blank=True, default='', max_length=128)
 
     class Meta:
         unique_together = [('timestamp', 'log')]
