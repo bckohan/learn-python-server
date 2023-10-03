@@ -1,20 +1,21 @@
-from django.test import TestCase, Client, override_settings
-from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+import shutil
+from pathlib import Path
+
+import pytest
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.core.management import call_command
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
+from learn_python_server.finders import DocBuildFinder
 from learn_python_server.models import (
+    Assignment,
     Course,
     CourseRepository,
     Module,
-    Assignment
 )
-from learn_python_server.finders import DocBuildFinder
 from learn_python_server.tests.admin import AdminUserMixin
-from django.core.management import call_command
-from django.contrib.auth import get_user_model
-from django.urls import reverse
-from pathlib import Path
-import pytest
-import shutil
 
 
 class AddCourseMixin(AdminUserMixin):

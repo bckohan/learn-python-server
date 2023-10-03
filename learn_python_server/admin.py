@@ -1,9 +1,12 @@
 """
 Admin interface for all models in etc_player.
 """
+import os
+from pathlib import Path
 from typing import Any
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
@@ -13,7 +16,7 @@ from django.db.models.query import QuerySet
 from django.http.request import HttpRequest
 from django.http.response import HttpResponseRedirect
 from django.urls import path, reverse
-from django.utils.html import format_html
+from django.utils.html import format_html, mark_safe
 from django.utils.timezone import localtime
 from django.utils.translation import gettext_lazy as _
 from learn_python_server.models import (
@@ -23,21 +26,20 @@ from learn_python_server.models import (
     CourseRepositoryVersion,
     DocBuild,
     Enrollment,
-    LogFile,
     LogEvent,
-    TestEvent,
+    LogFile,
     Module,
     SpecialTopic,
     Student,
     StudentRepository,
     StudentRepositoryPublicKey,
+    TestEvent,
     TutorAPIKey,
     TutorEngagement,
     TutorExchange,
     TutorSession,
     User,
 )
-from django.utils.html import mark_safe
 
 
 class ReadOnlyMixin:
@@ -466,7 +468,7 @@ class LogFileAdmin(ReadOnlyMixin, admin.ModelAdmin):
 @admin.register(LogEvent)
 class LogEventAdmin(ReadOnlyMixin, admin.ModelAdmin):
 
-    list_display = ('timestamp', 'level', 'student')
+    list_display = ('timestamp', 'level_colored', 'student', 'log_file', 'lines', 'message_preview')
     search_fields = (
         'log__repository__student__full_name',
         'log__repository__student__handle',
@@ -479,16 +481,24 @@ class LogEventAdmin(ReadOnlyMixin, admin.ModelAdmin):
     def student(self, obj):
         if obj.log:
             return obj.log.repository.student.display
+        
+    def lines(self, obj):
+        return mark_safe(f'{obj.line_begin} - {obj.line_end}')
+        
+    def log_file(self, obj):
+        return format_html(
+            '<a href="{}">{}</a>',
+            Path(settings.MEDIA_URL) / obj.log.log.name,
+            os.path.basename(obj.log.log.name)
+        )
+    
+    log_file.short_description = _('Log')
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(
             'log__repository',
             'log__repository__student'
         )
-    
-    def log_file(self, obj):
-        url = reverse('admin:learn_python_server_logfile_change', args=[obj.log.id])
-        return format_html('<a href="{}">{}</a>', url, obj.log.name)
     
     exclude = ('message',)
 
@@ -500,21 +510,34 @@ class LogEventAdmin(ReadOnlyMixin, admin.ModelAdmin):
     
     log_file.short_description = _('Log File')
 
+    def level_colored(self, obj):
+        return format_html(
+            f'<div style="font-weight: bold;text-align: center; background-color: '
+            f'{obj.level.color};color: white;">{str(obj.level).upper()}</div>'
+        )
+
+    level_colored.short_description = 'Level'
+
+    def message_preview(self, obj):
+        return obj.message.split('\n')[0].strip()
+
+    message_preview.short_description = 'Message'
+
 
 @admin.register(TestEvent)
 class TestEventAdmin(LogEventAdmin):
 
-    list_display = ('timestamp', 'level', 'student', 'result', 'runner', 'assignment')
+    list_display = ('timestamp', 'level_colored', 'student', 'result_colored', 'runner', 'assignment')
     
     list_filter = (
         *LogEventAdmin.list_filter,
+        'result',
         'runner',
     )
 
-    def result_display(self, obj):
-        import ipdb
-        ipdb.set_trace()
-        return mark_safe(str(obj.result))
+    def result_colored(self, obj):
+        return format_html(f'<div style="font-weight: bold;text-align: center; background-color: {obj.result.color};color: white;">{str(obj.result).upper()}</div>')
 
+    result_colored.short_description = 'Result'
 
 admin.register(TutorAPIKey)(admin.ModelAdmin)

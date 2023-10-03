@@ -1,20 +1,21 @@
-from django.test import TestCase, Client, override_settings
-from django.contrib.staticfiles.testing import LiveServerTestCase
+import subprocess
+from pathlib import Path
+
+import yaml
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.staticfiles.testing import LiveServerTestCase
+from django.core.management import call_command
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
+from learn_python_server.finders import DocBuildFinder
 from learn_python_server.models import (
+    Enrollment,
     Repository,
     Student,
     StudentRepository,
-    Enrollment
 )
-from learn_python_server.finders import DocBuildFinder
 from learn_python_server.tests.course import AddCourseMixin
-from django.core.management import call_command
-from django.contrib.auth import get_user_model
-from django.urls import reverse
-from pathlib import Path
-import subprocess
-import yaml
 
 
 class AddStudentMixin(AddCourseMixin):

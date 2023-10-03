@@ -31,7 +31,7 @@ classifiers = [
 python = "^3.9"
 django = "^4.2.5"
 psycopg = "^3.1.10"
-django-enum = "^1.2.1"
+django-enum = "^1.2.2"
 enum-properties = "^1.6.0"
 django-polymorphic = "^3.1.0"
 django-split-settings = "^1.2.0"
@@ -51,6 +51,7 @@ pytest-cov = "^4.1.0"
 pytest-django = "^4.5.2"
 pytest-order = "^1.1.0"
 pyyaml = "^6.0.1"
+safety = "^2.3.5"
 
 [build-system]
 requires = ["poetry-core"]

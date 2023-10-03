@@ -33,12 +33,7 @@ from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 from django_enum import EnumField, IntegerChoices, TextChoices
 from enum_properties import p, s
-from learn_python_server.utils import (
-    TemporaryDirectory,
-    calculate_sha256,
-    normalize_url,
-    num_lines,
-)
+from learn_python_server.utils import TemporaryDirectory, normalize_url
 from polymorphic.models import PolymorphicManager, PolymorphicModel
 
 
@@ -1053,16 +1048,16 @@ class LogFile(models.Model):
 
 class LogEvent(PolymorphicModel):
 
-    class LogLevel(IntegerChoices, s('numeric'), s('alts')):
+    class LogLevel(IntegerChoices, p('color'), s('alts')):
 
         _symmetric_builtins_ = (s('label', case_fold=True),)
 
-        NOTSET    = 0,  'NOTSET',   []
-        DEBUG     = 10, 'DEBUG',    []
-        INFO      = 20, 'INFO',     []
-        WARN      = 30, 'WARN',     ['WARNING']
-        ERROR     = 40, 'ERROR',    ['EXCEPTION']
-        CRITICAL  = 50, 'CRITICAL', ['FATAL']
+        NOTSET    = 0,  'NOTSET',   '#9c9c9c', []
+        DEBUG     = 10, 'DEBUG',    '#e342f5', []
+        INFO      = 20, 'INFO',     '#4287f5', []
+        WARN      = 30, 'WARN',     '#f0d805', ['WARNING']
+        ERROR     = 40, 'ERROR',    '#cc0000', ['EXCEPTION']
+        CRITICAL  = 50, 'CRITICAL', '#cc0000', ['FATAL']
 
         def __str__(self):
             return self.label
@@ -1116,14 +1111,14 @@ class TestEvent(LogEvent):
         def __str__(self):
             return self.label
         
-    class Result(IntegerChoices, s('alts', case_fold=True)):
+    class Result(IntegerChoices, p('color'), s('alts', case_fold=True)):
 
         _symmetric_builtins_ = (s('label', case_fold=True),)
 
-        PASSED   = 0, 'Passed',  ['pass']
-        FAILED   = 1, 'Failed',  ['fail', 'failure']
-        ERRORED  = 2, 'Errored', ['error']
-        SKIPPED  = 3, 'Skipped', ['skip']
+        PASSED   = 0, 'Passed',  '#02a102', ['pass']
+        FAILED   = 1, 'Failed',  '#cc0000', ['fail', 'failure']
+        ERRORED  = 2, 'Errored', '#cc0000', ['error']
+        SKIPPED  = 3, 'Skipped', '#f0d805', ['skip']
 
         def __str__(self):
             return self.label

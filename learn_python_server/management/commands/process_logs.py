@@ -9,12 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
-from learn_python_server.models import (
-    LogEvent,
-    LogFile,
-    TestEvent,
-    Assignment
-)
+from learn_python_server.models import Assignment, LogEvent, LogFile, TestEvent
 from learn_python_server.utils import TemporaryDirectory
 
 

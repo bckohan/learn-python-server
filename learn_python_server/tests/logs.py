@@ -1,29 +1,29 @@
-from django.test import TestCase, Client, override_settings
-from django.contrib.staticfiles.testing import LiveServerTestCase
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.staticfiles.testing import LiveServerTestCase
+from django.core.management import call_command
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
+from learn_python_server.finders import DocBuildFinder
 from learn_python_server.models import (
-    LogFile,
-    TestEvent,
+    Enrollment,
     LogEvent,
+    LogFile,
     Student,
     StudentRepository,
-    Enrollment,
+    TestEvent,
     TutorAPIKey,
     TutorBackend,
     TutorEngagement,
     TutorExchange,
-    TutorSession
+    TutorSession,
 )
-from learn_python_server.finders import DocBuildFinder
 from learn_python_server.tests.register import AddStudentMixin
-from django.core.management import call_command
-from django.contrib.auth import get_user_model
-from django.urls import reverse
-from pathlib import Path
-import subprocess
-import shutil
-import os
-
 
 
 class TestLogUpload(AddStudentMixin, LiveServerTestCase):
@@ -65,12 +65,13 @@ class TestLogUpload(AddStudentMixin, LiveServerTestCase):
             try:
                 #ipdb.set_trace()
                 subprocess.check_output(['poetry', 'run', 'pytest']).decode().strip()
-                self.assertEqual(LogFile.objects.count(), 2)
-                self.assertEqual(LogFile.objects.filter(type=LogFile.LogFileType.TESTING).count(), 1)
-                self.assertEqual(LogFile.objects.filter(type=LogFile.LogFileType.GENERAL).count(), 1)
-                general_line_counts.append(LogFile.objects.get(type=LogFile.LogFileType.GENERAL).num_lines)
             except subprocess.CalledProcessError as e:
                 pass  # if tests fail we dont care
+
+            self.assertEqual(LogFile.objects.count(), 2)
+            self.assertEqual(LogFile.objects.filter(type=LogFile.LogFileType.TESTING).count(), 1)
+            self.assertEqual(LogFile.objects.filter(type=LogFile.LogFileType.GENERAL).count(), 1)
+            general_line_counts.append(LogFile.objects.get(type=LogFile.LogFileType.GENERAL).num_lines)
             
             #ipdb.set_trace()
             subprocess.check_output(['poetry', 'run', 'delphi']).decode().strip()
@@ -120,8 +121,17 @@ class TestLogUpload(AddStudentMixin, LiveServerTestCase):
         for idx, line_count in enumerate(general_line_counts[1:]):
             self.assertGreater(line_count, general_line_counts[idx])
 
+        call_command('update_course', course=self.course.id)
+        call_command('process_logs')
+
+        self.assertGreater(TestEvent.objects.count(), 0)
+        self.assertGreater(LogEvent.objects.count(), 0)
+
         # test admins
-        for model in [LogFile, TutorAPIKey, TutorEngagement, TutorExchange, TutorSession]:
+        for model in [
+            LogFile, TutorAPIKey, TutorEngagement, 
+            TutorExchange, TutorSession, LogEvent, TestEvent
+        ]:
             response = self.client.get(
                 reverse(
                     f'admin:{model._meta.label_lower.replace(".", "_")}_change',
@@ -131,9 +141,3 @@ class TestLogUpload(AddStudentMixin, LiveServerTestCase):
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, 'Learn Python Server')
             self.assertContains(response, str(model.objects.first()))
-
-        call_command('update_course', course=self.course.id)
-        call_command('process_logs')
-
-        self.assertGreater(TestEvent.objects.count(), 0)
-        self.assertGreater(LogEvent.objects.count(), 0)

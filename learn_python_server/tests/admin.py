@@ -1,25 +1,27 @@
-from django.test import LiveServerTestCase, Client, override_settings
-from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+import pytest
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
+from django.test import Client, LiveServerTestCase, override_settings
+from django.urls import reverse
 from learn_python_server.models import (
     Assignment,
     Course,
     CourseRepository,
     DocBuild,
+    LogEvent,
     LogFile,
     Module,
     SpecialTopic,
     Student,
     StudentRepository,
+    TestEvent,
     TutorAPIKey,
     TutorEngagement,
     TutorExchange,
     TutorSession,
     User,
 )
-from django.urls import reverse
-from django.contrib.auth import get_user_model
-import pytest
 
 
 class AdminUserMixin:
@@ -52,7 +54,9 @@ class TestAdminListPages(AdminUserMixin, LiveServerTestCase):
         TutorEngagement,
         TutorExchange,
         TutorSession,
-        User
+        User,
+        LogEvent,
+        TestEvent
     ]
 
     def test_admin_pages_load(self):

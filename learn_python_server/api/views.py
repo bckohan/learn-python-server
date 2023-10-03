@@ -2,7 +2,7 @@ from django.http import Http404
 from learn_python_server.api.permissions import (
     CreateOrViewRepoItemPermission,
     HasAuthorizedTutor,
-    IsEnrolled
+    IsEnrolled,
 )
 from learn_python_server.api.serializers import (
     LogFileSerializer,
