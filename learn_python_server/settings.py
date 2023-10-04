@@ -17,7 +17,10 @@ from split_settings.tools import include, optional
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(
-    os.environ.get('LEARN_PYTHON_SERVER_DIR', Path(__file__).resolve().parent)
+    os.environ.get(
+        'LEARN_PYTHON_SERVER_DIR',
+        Path(__file__).resolve().parent.parent
+    )
 )
 
 
@@ -34,6 +37,7 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
+    'render_static',
     'rest_framework',
     'learn_python_server',
     'django.contrib.admin',
@@ -193,6 +197,31 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'learn_python_server.auth.RepositorySignatureAuthentication',
     ]
+}
+
+STATIC_TEMPLATES = {
+    'ENGINES': [{
+        'BACKEND': 'render_static.backends.StaticDjangoTemplates',
+        'OPTIONS': {
+            'loaders': [
+                ('render_static.loaders.StaticLocMemLoader', {
+                    'urls.js': (
+                        'export {% urls_to_js visitor="render_static.ClassURLWriter" '
+                        'exclude=exclude %}'
+                    )
+                })
+             ],
+            'builtins': ['render_static.templatetags.render_static']
+        },
+    }],
+    'templates': {
+        'urls.js': {
+            'dest': BASE_DIR / 'learn_python_server/static/learn_python_server/js' / 'urls.js',
+            'context': {
+                'exclude': ['admin', 'djdt']
+            }
+        }
+    }
 }
 
 include(optional(BASE_DIR / 'local.py'))

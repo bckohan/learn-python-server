@@ -93,8 +93,8 @@ class User(PolymorphicModel, AbstractUser, PermissionsMixin):
 
 class TutorBackend(TextChoices, p('uri')):
 
-    TEST    = 'test',   None
-    OPEN_AI = 'openai', 'https://platform.openai.com/'
+    TEST    = 'test',   'TEST', None
+    OPEN_AI = 'openai', 'OPEN AI', 'https://platform.openai.com/'
 
     def __str__(self):
         return self.value
@@ -756,17 +756,16 @@ class TimelineEvent(PolymorphicModel):
     )
 
     class Meta:
-        ordering = ('-timestamp',)
+        ordering = ('-timestamp', '-id')
         index_together = [('timestamp', 'repository')]
         unique_together = [('timestamp', 'repository')]
 
 
-class TutorExchange(models.Model):
+class TutorExchange(TimelineEvent):
 
     role = EnumField(TutorRole)
     content = models.TextField(null=False)
     is_function_call = models.BooleanField(null=False, default=False)
-    timestamp = models.DateTimeField(null=False, db_index=True)
 
     session = models.ForeignKey(
         'TutorSession',
@@ -777,11 +776,9 @@ class TutorExchange(models.Model):
     backend_extra = models.JSONField(null=True, blank=True)
 
     class Meta:
-        ordering = ['timestamp']
+        ordering = ['id']
         verbose_name = _('Tutor Exchange')
         verbose_name_plural = _('Tutor Exchanges')
-        unique_together = [('timestamp', 'session')]
-        ordering = ('timestamp',)
 
 
 class ToolRun(TimelineEvent):
@@ -825,6 +822,7 @@ class TutorSession(TimelineEvent):
     )
 
     class Meta:
+        ordering = ['session_id']
         unique_together = [('engagement', 'session_id')]
         verbose_name = _('Tutor Session')
         verbose_name_plural = _('Tutor Sessions')

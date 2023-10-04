@@ -169,7 +169,7 @@ class StudentAdmin(LPUserAdmin):
     ordering = ('handle',)
 
     fieldsets = (
-        (None, {'fields': ('handle', 'email',)}),
+        (None, {'fields': ('handle', 'domain', 'email',)}),
         ('Personal info', {'fields': ('full_name',)}),
         ('Dates', {'fields': ('date_joined', 'last_login')}),
         ('Credentials', {'fields': ('tutor_key',)})
@@ -177,7 +177,7 @@ class StudentAdmin(LPUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('handle', 'email'),
+            'fields': ('handle', 'domain', 'email'),
         }),
         ('Personal info', {'fields': ('full_name',)}),
         ('Credentials', {'fields': ('tutor_key',)}),
@@ -302,7 +302,9 @@ class CourseRepositoryAdmin(admin.ModelAdmin):
 
 @admin.register(TutorExchange)
 class TutorExchangeAdmin(ReadOnlyMixin, admin.ModelAdmin):
-    pass
+    
+    def has_delete_permission(self, request, obj=None):
+        return True
 
 
 class TutorExchangeInlineAdmin(ReadOnlyMixin, admin.TabularInline):
@@ -346,6 +348,9 @@ class TutorSessionAdmin(ReadOnlyMixin, admin.ModelAdmin):
         return obj.exchanges.count()
 
     inlines = [TutorExchangeInlineAdmin,]
+
+    def has_delete_permission(self, request, obj=None):
+        return True
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Any]:
         return super().get_queryset(request).select_related(

@@ -32,7 +32,8 @@ from learn_python_server.utils import (
 from rest_framework.serializers import (
     CharField,
     IntegerField,
-    ModelSerializer
+    ModelSerializer,
+    SerializerMethodField
 )
 from rest_polymorphic.serializers import PolymorphicSerializer
 
@@ -54,6 +55,7 @@ class TutorExchangeSerializer(ModelSerializer):
     def create(self, validated_data):
         return TutorExchange.objects.get_or_create(
             timestamp=validated_data.pop('timestamp'),
+            repository=validated_data['session'].repository,
             session=validated_data.pop('session'),
             defaults=validated_data
         )[0]
@@ -314,26 +316,38 @@ class AssignmentTLSerializer(ModelSerializer):
         read_only_fields = fields
 
 
-class TutorExchangeTLSerializer(ModelSerializer):
+class TutorExchangeTLSerializer(TimelineEventSerializer):
 
     class Meta:
         model = TutorExchange
-        fields = ('id', 'role', 'content', 'timestamp', 'is_function_call')
+        fields = (
+            *TimelineEventSerializer.Meta.fields,
+            'role', 'content', 'is_function_call'
+        )
         read_only_fields = fields
 
 
 class TutorSessionTLSerializer(TimelineEventSerializer):
 
     assignment = AssignmentTLSerializer(read_only=True)
-    exchanges = TutorExchangeTLSerializer(many=True, read_only=False)
 
     class Meta:
         model = TutorSession
-        fields = (*TimelineEventSerializer.Meta.fields, 'timestamp', 'stop', 'session_id', 'assignment')
+        fields = (
+            *TimelineEventSerializer.Meta.fields,
+            'stop', 
+            'session_id',
+            'assignment'
+        )
         read_only_fields = fields
 
 
 class LogEventSerializer(TimelineEventSerializer):
+    
+    level = SerializerMethodField()
+
+    def get_level(self, obj):
+        return str(obj.level)
     
     class Meta:
         model = LogEvent
@@ -342,19 +356,32 @@ class LogEventSerializer(TimelineEventSerializer):
 
 
 class TestEventSerializer(LogEventSerializer):
-        
+    
+    assignment = AssignmentTLSerializer(read_only=True)
+
+    result = SerializerMethodField()
+    runner = SerializerMethodField()
+
+    def get_result(self, obj):
+        return str(obj.result)
+    
+    def get_runner(self, obj):
+        return str(obj.runner)
+
     class Meta:
         model = TestEvent
-        fields = (*LogEventSerializer.Meta.fields, 'identifier', 'result')
+        fields = (*LogEventSerializer.Meta.fields, 'assignment', 'runner', 'result')
         read_only_fields = fields
 
 
 class TimelinePolymorphicSerializer(PolymorphicSerializer):
+
     model_serializer_mapping = {
         TimelineEvent: TimelineEventSerializer,
         ToolRun: ToolRunSerializer,
         TutorEngagement: TutorEngagementTLSerializer,
         TutorSession: TutorSessionTLSerializer,
+        TutorExchange: TutorExchangeTLSerializer,
         LogEvent: LogEventSerializer,
         TestEvent: TestEventSerializer
     }

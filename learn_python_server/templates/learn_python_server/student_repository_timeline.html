@@ -1,0 +1,18 @@
+{% extends "learn_python_server/base.html" %}
+{% load static %}
+
+{% block content %}
+<div id="student-header">
+    <div id="ident"><h1>{{repository.student.display}}</h1><h1><a href="{{repository}}" target="_blank">{{repository}}</a></h1></div>
+</div>
+<div id="timeline"></div>
+{% endblock content %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script type="module" src="{% static 'learn_python_server/js/timeline.js' %}"></script>
+<script type="module">
+    import {Timeline} from "{% static 'learn_python_server/js/timeline.js' %}";
+    const timeline = new Timeline($('#timeline'), "{{ repository }}");
+</script>
+{% endblock scripts %}

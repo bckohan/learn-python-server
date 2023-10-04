@@ -42,6 +42,7 @@ router.register(r'logs', LogFileViewSet, basename='logs')
 
 class URLConverter:
     regex = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    placeholder = 'http://example.com'
 
     def to_python(self, value):
         return value
@@ -61,11 +62,11 @@ urlpatterns = [
     path('api/authorize_tutor', AuthorizeTutorView.as_view(), name='authorize_tutor'),
     path('api/', include(router.urls)),
     path('api/timeline', TimelineViewSet.as_view(), name='timeline'),
-    path('api/timeline/<url:repository>', TimelineViewSet.as_view(), name='timeline'),
-    path('api/timeline/<int:repository>', TimelineViewSet.as_view(), name='timeline'),
+    path('api/timeline/<url:uri>', TimelineViewSet.as_view(), name='timeline'),
+    path('api/timeline/<int:id>', TimelineViewSet.as_view(), name='timeline'),
     path('media/log_uploads/<str:log_name>', get_log, name='get_log'),
-    path('timeline/<url:repository>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
-    path('timeline/<int:repository>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
+    path('timeline/<url:uri>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
+    path('timeline/<int:id>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
     path('admin/', admin.site.urls)
 ]
 

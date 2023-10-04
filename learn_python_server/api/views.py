@@ -43,7 +43,7 @@ class AuthorizeTutorView(APIView):
             'tutor': request.user.authorized_repository.get_tutor_key().backend.value,
             'secret': request.user.authorized_repository.get_tutor_key().secret,
         })
-    
+
 
 class LogValidationErrors:
 
@@ -149,31 +149,28 @@ class TimelineViewSet(ListAPIView):
     serializer_class = TimelinePolymorphicSerializer
 
     def get_queryset(self):
-        repository = self.kwargs.get('repository', None)
+        uri = self.kwargs.get('uri', None)
+        id = self.kwargs.get('id', None)
         timeline_q = Q()
-        if repository is not None:
-            if repository.isdigit():
-                qry = Q(id=int(repository))
+        if uri or id is not None:
+            if id:
+                qry = Q(id=int(id))
             else:
-                qry = Q(uri=repository)
+                qry = Q(uri=uri)
             try:
                 repository = StudentRepository.objects.get(qry)
-                if not self.request.user.is_staff or self.request.user.is_superuser:
+                if not (self.request.user.is_staff or self.request.user.is_superuser):
                     if not((
                         repository in StudentRepository.objects.filter(
                             student__in=self.request.user.students.all()
                         )
                     ) or (
-                        repository == self.request.user.authorized_repository
+                        repository == getattr(self.request.user, 'authorized_repository', None)
                     )):
                         raise PermissionDenied()
                 timeline_q = Q(repository=repository)
             except StudentRepository.DoesNotExist:
                 raise Http404()
-        elif not self.request.user.is_superuser or self.request.user.is_staff:
+        elif not (self.request.user.is_superuser or self.request.user.is_staff):
             raise PermissionDenied()
-        return TimelineEvent.objects.filter(
-            timeline_q
-        ).select_related(
-            'repository'
-        ).filter(user=self.request.user)
+        return TimelineEvent.objects.filter(timeline_q).select_related('repository')

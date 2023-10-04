@@ -12,7 +12,7 @@ from django.http import (
     JsonResponse,
 )
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import DetailView
+from django.views.generic import TemplateView
 from learn_python_server.models import (
     DocBuild,
     LogFile,
@@ -123,7 +123,20 @@ def get_log(request, log_name):
         raise Http404() from err
 
 
-class StudentRepositoryTimelineView(DetailView):
-    model = StudentRepository
+class StudentRepositoryTimelineView(TemplateView):
+
     template_name = 'learn_python_server/student_repository_timeline.html'
-    context_object_name = 'repository'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        try:
+            if 'uri' in kwargs:
+                context['repository'] = StudentRepository.objects.get(uri=kwargs['uri'])
+            elif 'id' in kwargs:
+                context['repository'] = StudentRepository.objects.get(id=kwargs['id'])
+            else:
+                # todo - unified timeline?
+                raise Http404()
+        except StudentRepository.DoesNotExist:
+            raise Http404()
+        return context
