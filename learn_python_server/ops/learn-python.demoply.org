@@ -1,0 +1,38 @@
+server {
+    # use 'listen 80 deferred;' for Linux
+    # use 'listen 80 accept_filter=httpready;' for FreeBSD
+    listen 443 ssl;
+    client_max_body_size 4G;
+
+    # set the correct host(s) for your site
+    server_name learn-python.demoply.org
+
+    keepalive_timeout 5;
+
+    ssl_certificate    /etc/ssl/demoply.org.pem;
+    ssl_certificate_key    /etc/ssl/demoply.org.pem.key;
+
+    access_log /var/log/nginx/demoply.org/learn-python.access.log;
+    error_log /var/log/nginx/demoply.org/learn-python.error.log;
+
+    location /static/ {
+        alias /var/www/demoply.org/learn-python/static/;
+    }
+    location /media/ {
+        alias /var/www/demoply.org/learn-python/media/;
+    }
+
+    location / {
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Host $http_host;
+      # we don't want nginx trying to do something clever with
+      # redirects, we set the Host: header above already.
+      proxy_redirect off;
+      proxy_pass http://unix:/run/learn-python.sock;
+    }
+
+    proxy_read_timeout 300;
+    proxy_connect_timeout 300;
+    proxy_send_timeout 300;
+}

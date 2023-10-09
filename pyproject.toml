@@ -27,6 +27,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
+[tool.poetry.scripts]
+manage = 'learn_python_server.manage:main'
+
 [tool.poetry.dependencies]
 python = "^3.9"
 django = "^4.2.5"
