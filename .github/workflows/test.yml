@@ -106,7 +106,7 @@ jobs:
         LEARN_PYTHON_RDBMS: sqlite
     strategy:
       matrix:
-        python-version: [ '3.9', '3.11']
+        python-version: [ '3.8', '3.9', '3.11']
 
     steps:
       - uses: actions/checkout@v3
