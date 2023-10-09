@@ -107,7 +107,10 @@ def register(request, repository):
 
 def get_log(request, log_name):
     try:
-        log_file = LogFile.objects.get(log__icontains=log_name)
+        if log_name.isdigit():
+            log_file = LogFile.objects.get(id=int(log_name))
+        else:
+            log_file = LogFile.objects.get(log__icontains=log_name)
         if (
             os.path.exists(log_file.log.path) and (
                 (request.user.is_staff or request.user.is_superuser)
@@ -137,6 +140,8 @@ class StudentRepositoryTimelineView(TemplateView):
             else:
                 # todo - unified timeline?
                 raise Http404()
+            if hasattr(context['repository'], 'enrollment'):
+                context['course'] = context['repository'].enrollment.course
         except StudentRepository.DoesNotExist:
             raise Http404()
         return context

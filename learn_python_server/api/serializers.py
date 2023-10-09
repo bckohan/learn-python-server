@@ -240,6 +240,11 @@ class LogFileSerializer(ModelSerializer):
                     Q(type=type) & 
                     (Q(date=log_file.date) | Q(date__isnull=True))
                 ).exclude(pk=log_file.pk).select_for_update():
+                    if not os.path.exists(other_log.log.path):
+                        # some weird polymorphic delete bug
+                        TestEvent.objects.filter(log=other_log).delete()
+                        other_log.delete()
+                        continue
                     with (
                         gzip.open(other_log.log.path, 'rb') as file1, 
                         gzip.open(log_file.log.path, 'rb') as file2
@@ -249,6 +254,8 @@ class LogFileSerializer(ModelSerializer):
                                 other_log, log_file = log_file, other_log
                             if os.path.exists(other_log.log.path):
                                 os.remove(other_log.log.path)
+
+                            TestEvent.objects.filter(log=other_log).delete()
                             other_log.delete()
 
             return log_file
@@ -276,11 +283,16 @@ class LogFileSerializer(ModelSerializer):
 class TimelineEventSerializer(ModelSerializer):
 
     repository = CharField(source='repository.uri', read_only=True)
-
+    log_link = SerializerMethodField()
+    
+    def get_log_link(self, obj):
+        return obj.log_link
+    
     class Meta:
         model = TimelineEvent
-        fields = ('id', 'timestamp', 'repository')
+        fields = ('id', 'timestamp', 'repository', 'log_link')
         read_only_fields = fields
+
 
 class ToolRunSerializer(TimelineEventSerializer):
     
@@ -298,24 +310,6 @@ class TutorEngagementTLSerializer(ToolRunSerializer):
         read_only_fields = fields
 
 
-class ModuleTLSerializer(ModelSerializer):
-
-    class Meta:
-        model = Module
-        fields = ('id', 'number', 'name', 'topic')
-        read_only_fields = fields
-
-
-class AssignmentTLSerializer(ModelSerializer):
-
-    module = ModuleTLSerializer(read_only=True)
-
-    class Meta:
-        model = Assignment
-        fields = ('id', 'module', 'number', 'name', 'identifier')
-        read_only_fields = fields
-
-
 class TutorExchangeTLSerializer(TimelineEventSerializer):
 
     class Meta:
@@ -329,7 +323,10 @@ class TutorExchangeTLSerializer(TimelineEventSerializer):
 
 class TutorSessionTLSerializer(TimelineEventSerializer):
 
-    assignment = AssignmentTLSerializer(read_only=True)
+    assignment = SerializerMethodField(read_only=True)
+
+    def get_assignment(self, obj):
+        return obj.assignment_id
 
     class Meta:
         model = TutorSession
@@ -351,16 +348,19 @@ class LogEventSerializer(TimelineEventSerializer):
     
     class Meta:
         model = LogEvent
-        fields = (*TimelineEventSerializer.Meta.fields, 'level', 'message')
+        fields = (*TimelineEventSerializer.Meta.fields, 'level', 'message', 'line_begin', 'line_end')
         read_only_fields = fields
 
 
 class TestEventSerializer(LogEventSerializer):
     
-    assignment = AssignmentTLSerializer(read_only=True)
+    assignment = SerializerMethodField(read_only=True)
 
     result = SerializerMethodField()
     runner = SerializerMethodField()
+
+    def get_assignment(self, obj):
+        return obj.assignment_id
 
     def get_result(self, obj):
         return str(obj.result)
@@ -385,3 +385,21 @@ class TimelinePolymorphicSerializer(PolymorphicSerializer):
         LogEvent: LogEventSerializer,
         TestEvent: TestEventSerializer
     }
+
+
+class AssignmentTLSerializer(ModelSerializer):
+
+    class Meta:
+        model = Assignment
+        fields = ('id', 'number', 'name', 'identifier')
+        read_only_fields = fields
+
+
+class ModuleSerializer(ModelSerializer):
+
+    assignments = AssignmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Module
+        fields = ('id', 'number', 'name', 'topic', 'assignments')
+        read_only_fields = fields

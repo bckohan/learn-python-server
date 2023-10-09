@@ -23,7 +23,8 @@ from learn_python_server.api.views import (
     AuthorizeTutorView,
     LogFileViewSet,
     TutorEngagementViewSet,
-    TimelineViewSet
+    TimelineViewSet,
+    ModuleViewSet
 )
 from learn_python_server.views import (
     StudentRepositoryTimelineView,
@@ -64,6 +65,8 @@ urlpatterns = [
     path('api/timeline', TimelineViewSet.as_view(), name='timeline'),
     path('api/timeline/<url:uri>', TimelineViewSet.as_view(), name='timeline'),
     path('api/timeline/<int:id>', TimelineViewSet.as_view(), name='timeline'),
+    path('api/modules/<url:uri>', ModuleViewSet.as_view(), name='modules'),
+    path('api/modules/<int:id>', ModuleViewSet.as_view(), name='modules'),
     path('media/log_uploads/<str:log_name>', get_log, name='get_log'),
     path('timeline/<url:uri>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),
     path('timeline/<int:id>', StudentRepositoryTimelineView.as_view(), name='student_timeline'),

@@ -1,0 +1,110 @@
+#timeline {
+    width: 90%;
+    margin: 0 auto;
+}
+
+.timeline-event {
+    position: relative;
+    border: 1px solid black;
+    padding-left: 10px; /* Space for the vertically oriented name */
+    padding-right: 10px;
+    padding-top: 30px;  /* Space for the header */
+    padding-bottom: 10px;
+    margin-top: 5px;
+}
+
+/*
+.tool-name {
+    position: absolute;
+    top: 30%;
+    left: 10px;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    transform-origin: center;
+    margin-top: -0.5em; 
+}
+*/
+
+.event-header {
+    display: flex;
+    justify-content: space-between;
+    position: absolute;
+    top: 5px;
+    left: 10px;  /* Start after the vertical name space */
+    right: 10px;
+}
+
+.event-header span {
+    white-space: nowrap;
+}
+
+.event-contents {
+    margin-top: 10px;
+}
+
+.timeline-event.test-event.test-passed {
+    border-left: 10px solid green;
+}
+.timeline-event.test-event.test-failed {
+    border-left: 10px solid darkred;
+}
+
+span.event-name {
+    font-weight: bold;
+}
+
+.timeline-event.tutor-session {
+    padding-top: 10px;
+}
+.timeline-event.tutor-session > .event-header {
+    display: none;
+}
+
+.timeline-event.log-event.level-debug {
+    border-left: 10px solid purple;
+}
+.timeline-event.log-event.level-info {
+    border-left: 10px solid blue;
+}
+.timeline-event.log-event.level-error {
+    border-left: 10px solid darkred;
+}
+.timeline-event.log-event.level-critical {
+    border-left: 10px solid black;
+}
+.timeline-event.log-event.level-warn {
+    border-left: 10px solid yellow;
+}
+
+.timeline-date {
+    margin-top: 40px;
+}
+.timeline-date .date-container {
+    padding: 10px;
+}
+.timeline-date > span {
+    font-weight: bold;
+}
+
+.collapsed {
+    display: none;
+}
+
+.toggle-button {
+    background-color: #007BFF;  /* Blue color */
+    color: white;
+    border: none;
+    border-radius: 5px; /* Rounded corners */
+    font-size: 10px; /* Font size for the button text */
+    cursor: pointer; /* Hand cursor on hover */
+    transition: background-color 0.3s; /* Smooth color transition on hover */
+}
+
+.toggle-button:hover {
+    background-color: #0056b3;  /* Darker blue color on hover */
+}
+
+.toggle-button {
+    margin-right: 8px; /* Space between the icon and the button text */
+}

@@ -165,7 +165,7 @@ tmp/
 poetry.lock
 **/media/
 **/.DS_Store
-*.sqlite3
+*.sqlite3*
 logs/
 local.py
 static/

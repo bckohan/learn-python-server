@@ -35,6 +35,9 @@ from django_enum import EnumField, IntegerChoices, TextChoices
 from enum_properties import p, s
 from learn_python_server.utils import TemporaryDirectory, normalize_url
 from polymorphic.models import PolymorphicManager, PolymorphicModel
+from django.urls import reverse
+from django.contrib.admin.utils import NestedObjects
+from django.db.models import deletion
 
 
 def NON_POLYMORPHIC_CASCADE(collector, field, sub_objs, using):
@@ -751,13 +754,27 @@ class TimelineEvent(PolymorphicModel):
     timestamp = models.DateTimeField(null=False, db_index=True)
     repository = models.ForeignKey(
         'StudentRepository',
-        on_delete=models.CASCADE,
+        on_delete=NON_POLYMORPHIC_CASCADE,
         related_name='timeline_events'
     )
 
+    log = models.ForeignKey(
+        'LogFile',
+        null=True,
+        default=None,
+        related_name='events',
+        on_delete=NON_POLYMORPHIC_CASCADE,
+    )
+
+    @property
+    def log_link(self):
+        if self.log_id:
+            return reverse('get_log', kwargs={'log_name': str(self.log_id)})
+        return None
+
     class Meta:
         ordering = ('-timestamp', '-id')
-        index_together = [('timestamp', 'repository')]
+        index_together = [('timestamp', 'repository'), ('timestamp', 'repository', 'log')]
         unique_together = [('timestamp', 'repository')]
 
 
@@ -769,7 +786,7 @@ class TutorExchange(TimelineEvent):
 
     session = models.ForeignKey(
         'TutorSession',
-        on_delete=models.CASCADE,
+        on_delete=NON_POLYMORPHIC_CASCADE,
         related_name='exchanges'
     )
 
@@ -790,7 +807,7 @@ class ToolRun(TimelineEvent):
             s('label', case_fold=True)
         ]
 
-        TUTOR  = 'tutor',  'tutor',  ['delphi']
+        TUTOR  = 'delphi',  'tutor',  []
         PYTEST = 'pytest', 'pytest', []
         DOCS   = 'docs',   'docs',   []
     
@@ -810,7 +827,7 @@ class TutorSession(TimelineEvent):
 
     engagement = models.ForeignKey(
         'TutorEngagement',
-        on_delete=models.CASCADE,
+        on_delete=NON_POLYMORPHIC_CASCADE,
         related_name='sessions'
     )
 
@@ -838,17 +855,9 @@ class TutorEngagement(ToolRun):
     tz_name = models.CharField(max_length=64, default='')
     tz_offset = models.SmallIntegerField(null=True, default=None)
 
-    log = models.ForeignKey(
-        'LogFile',
-        null=True,
-        default=None,
-        related_name='engagement',
-        on_delete=models.SET_NULL
-    )
-
     backend = EnumField(TutorBackend)
     backend_extra = models.JSONField(null=True, blank=True)
-        
+    
     def __str__(self):
         return f'[{self.timestamp}] {self.repository.student.display}'
 
@@ -866,7 +875,7 @@ class Module(PolymorphicModel):
 
     repository = models.ForeignKey(
         'CourseRepository',
-        on_delete=models.CASCADE,
+        on_delete=NON_POLYMORPHIC_CASCADE,
         related_name='modules'
     )
 
@@ -1004,6 +1013,10 @@ class LogFile(models.Model):
         help_text=_('Whether or not the events have been scraped from the log file.')
     )
 
+    # def delete(self, *args, **kwargs):
+    #     TimelineEvent.objects.filter(log=self).delete()
+    #     return super().delete(*args, **kwargs)
+
     class LogIterator:
         """
         Iterate over each message in the log file. Each message is a dictionary of 
@@ -1107,13 +1120,6 @@ class LogEvent(TimelineEvent):
     line_begin = models.PositiveIntegerField()
     line_end = models.PositiveIntegerField()
 
-    log = models.ForeignKey(
-        LogFile,
-        on_delete=NON_POLYMORPHIC_CASCADE,
-        related_name='events',
-        null=True,
-        default=None
-    )
     message = models.TextField(null=False, blank=True, default='')
     logger = models.CharField(null=False, blank=True, default='', max_length=128)
 
@@ -1155,7 +1161,7 @@ class TestEvent(LogEvent):
     assignment = models.ForeignKey(
         Assignment,
         related_name='tests',
-        on_delete=models.CASCADE
+        on_delete=NON_POLYMORPHIC_CASCADE
     )
 
     class Meta:

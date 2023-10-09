@@ -7,14 +7,17 @@ from learn_python_server.api.permissions import (
 from learn_python_server.api.serializers import (
     LogFileSerializer,
     TutorEngagementSerializer,
-    TimelinePolymorphicSerializer
+    TimelinePolymorphicSerializer,
+    ModuleSerializer
 )
 from learn_python_server.models import (
     LogFile,
     Student,
     TutorEngagement,
     TimelineEvent,
-    StudentRepository
+    StudentRepository,
+    CourseRepository,
+    Module
 )
 from rest_framework.permissions import IsAdminUser
 from rest_framework.mixins import (
@@ -29,7 +32,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 from rest_framework.generics import ListAPIView
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 import logging
 
 api_logger = logging.getLogger('learn_python_server.api')
@@ -174,3 +177,24 @@ class TimelineViewSet(ListAPIView):
         elif not (self.request.user.is_superuser or self.request.user.is_staff):
             raise PermissionDenied()
         return TimelineEvent.objects.filter(timeline_q).select_related('repository')
+
+
+class ModuleViewSet(ListAPIView):
+
+    serializer_class = ModuleSerializer
+
+    def get_queryset(self):
+        uri = self.kwargs.get('uri', None)
+        id = self.kwargs.get('id', None)
+        timeline_q = Q()
+        if uri or id is not None:
+            if id:
+                qry = Q(id=int(id))
+            else:
+                qry = Q(uri=uri)
+            try:
+                return Module.objects.filter(
+                    repository=CourseRepository.objects.get(qry)
+                ).prefetch_related('assignments')
+            except CourseRepository.DoesNotExist:
+                raise Http404()

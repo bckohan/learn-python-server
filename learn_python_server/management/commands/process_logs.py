@@ -113,12 +113,18 @@ class Command(BaseCommand):
                     if 'stop' in log_record:
                         if runner_stack and runner_stack[-1][0] == log_record['stop']:
                             tool_start = runner_stack.pop()
-                            ToolRun.objects.get_or_create(
-                                tool=tool_start[0],
-                                timestamp=tool_start[1],
-                                stop=log_record['timestamp'],
-                                repository=log_file.repository
-                            )
+                            try:
+                                ToolRun.objects.get_or_create(
+                                    tool=tool_start[0],
+                                    timestamp=tool_start[1],
+                                    stop=log_record['timestamp'],
+                                    repository=log_file.repository,
+                                    log=log_file
+                                )
+                            except Exception as e:
+                                self.stderr.write(
+                                    self.style.ERROR(_('Error processing tool run: {}').format(e))
+                                )
                         continue
                     if 'result' in log_record and 'identifier' in log_record:
                         log_record['assignment'] = Assignment.objects.filter(
@@ -142,6 +148,7 @@ class Command(BaseCommand):
                         repository=log_file.repository
                     )
                 except Exception as e:
+
                     self.stderr.write(self.style.ERROR(_('Error processing log record: {}').format(e)))
                     self.stderr.write(self.style.ERROR(_('Log record: {}').format(log_record)))
                     continue

@@ -1,6 +1,20 @@
 {% extends "learn_python_server/base.html" %}
 {% load static %}
 
+{% block extra_head %}
+<link href="{% static 'learn_python_server/css/timeline.css' %}" rel="stylesheet">
+<style>
+    #student-header {
+        margin: 50px;
+    }
+    #student-header > #ident {
+        display: flex;
+        justify-content: space-between;
+    }
+</style>
+{% endblock extra_head %}
+
+{% block title %}{{repository.student.display}}{% endblock title %}
 {% block content %}
 <div id="student-header">
     <div id="ident"><h1>{{repository.student.display}}</h1><h1><a href="{{repository}}" target="_blank">{{repository}}</a></h1></div>
@@ -13,6 +27,6 @@
 <script type="module" src="{% static 'learn_python_server/js/timeline.js' %}"></script>
 <script type="module">
     import {Timeline} from "{% static 'learn_python_server/js/timeline.js' %}";
-    const timeline = new Timeline($('#timeline'), "{{ repository }}");
+    const timeline = new Timeline($('#timeline'), "{{ repository }}", "{{ course.repository.uri }}");
 </script>
 {% endblock scripts %}
