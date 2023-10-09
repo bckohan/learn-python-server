@@ -31,7 +31,7 @@ classifiers = [
 manage = 'learn_python_server.manage:main'
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 django = "^4.2.5"
 psycopg = {extras = ["c"], version = "^3.1.12"}
 django-enum = "^1.2.2"
