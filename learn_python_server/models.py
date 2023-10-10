@@ -139,7 +139,7 @@ def repo_guard(func):
         def venv():
             try:
                 return Path(subprocess.check_output(
-                    ['poetry', 'env', 'info', '--path']
+                    [settings.POETRY, 'env', 'info', '--path']
                     ).decode().strip()
                 )
             except subprocess.CalledProcessError:
@@ -288,17 +288,17 @@ class Repository:
         os.chdir(self.local)
         self._venv = os.environ.pop('VIRTUAL_ENV', None)
         self._virtualenvs_in_project = subprocess.check_output(
-            ['poetry', 'config', 'virtualenvs.in-project']
+            [settings.POETRY, 'config', 'virtualenvs.in-project']
         ).strip().decode().lower() == 'true'
         subprocess.check_output(
-            ['poetry', 'config', 'virtualenvs.in-project', 'true']
+            [settings.POETRY, 'config', 'virtualenvs.in-project', 'true']
         )
         self._in_context = True
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         subprocess.check_output([
-            'poetry',
+            settings.POETRY,
             'config',
             'virtualenvs.in-project',
             'true' if self._virtualenvs_in_project else 'false'
@@ -314,18 +314,18 @@ class Repository:
     @repo_guard
     def venv(self):
         return Path(subprocess.check_output(
-            ['poetry', 'env', 'info', '--path']
+            [settings.POETRY, 'env', 'info', '--path']
             ).decode().strip()
         )
 
     @repo_guard
     def install(self):
-        return subprocess.check_output(['poetry', 'install']).decode().strip()
+        return subprocess.check_output([settings.POETRY, 'install']).decode().strip()
 
     @repo_guard
     def doc_build(self, *args):
         return Path(subprocess.check_output(
-            ['poetry', 'run', 'doc', 'build', *(args or ['--detached'])
+            [settings.POETRY, 'run', 'doc', 'build', *(args or ['--detached'])
         ]).decode().strip().split('\n')[-1])
 
     @repo_guard
@@ -336,7 +336,7 @@ class Repository:
         def do_get():
             return json.loads(
                 subprocess.check_output(
-                    ['poetry', 'run', 'doc', 'structure']
+                    [settings.POETRY, 'run', 'doc', 'structure']
                 ).decode().strip() or '{}'
             )
         try:

@@ -33,7 +33,7 @@ manage = 'learn_python_server.manage:main'
 [tool.poetry.dependencies]
 python = "^3.9"
 django = "^4.2.5"
-psycopg = {extras = ["c"], version = "^3.1.12"}
+psycopg = {extras = ["binary"], version = "^3.1.12"}
 django-enum = "^1.2.2"
 enum-properties = "^1.6.0"
 django-polymorphic = "^3.1.0"
@@ -46,6 +46,7 @@ python-dateutil = "^2.8.2"
 django-rest-polymorphic = "^0.1.10"
 django-render-static = "^1.1.6"
 psycopg-binary = "^3.1.12"
+gunicorn = "^21.2.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "^8.13.2"

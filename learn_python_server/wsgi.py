@@ -11,6 +11,9 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
+# todo none of this should be packaged for the public - also look at manage.py
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'learn_python_server.settings')
+os.environ.setdefault('LEARN_PYTHON_RDBMS', 'postgres')
+os.environ.setdefault('LEARN_PYTHON_SERVER_DIR', '/var/www/demoply.org/learn-python')
 
 application = get_wsgi_application()

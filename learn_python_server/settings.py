@@ -131,6 +131,8 @@ FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o770
 
 SECRETS_DIR = Path(BASE_DIR) / 'secrets'
 
+POETRY = 'poetry'
+
 
 def generate_secret_key(filename):
     from django.core.management.utils import get_random_secret_key
@@ -165,7 +167,7 @@ if len(SECRET_KEY) == 0:
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-if os.environ.get('LEARN_PYTHON_RDBMS', None) == 'postgres':
+if os.environ.get('LEARN_PYTHON_RDBMS', '').startswith('postgres'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',

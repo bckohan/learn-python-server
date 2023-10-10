@@ -8,6 +8,14 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from django.conf import settings
 from django.utils import timezone
+from django.db import transaction, DEFAULT_DB_ALIAS
+
+
+def is_in_transaction(using=DEFAULT_DB_ALIAS):
+    """
+    Returns True if the current code block is inside a transaction, False otherwise.
+    """
+    return transaction.get_connection(using).in_atomic_block
 
 
 def is_gzip(file):

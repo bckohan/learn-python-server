@@ -167,7 +167,7 @@ class TutorEngagement extends ToolRun {
 class TutorExchange extends TimelineEvent {
     render(parent) {
         let div = super.render(parent);
-        let container = $(`<div class="event-contents role-${this.event.role}"></div>`)
+        let container = $(`<div class="event-contents role-${this.event.role} collapsed"></div>`)
         div.append(container);
         container.append($(marked.parse(this.event.content)));
         return div;

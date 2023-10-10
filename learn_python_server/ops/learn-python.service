@@ -14,7 +14,7 @@ Group=www-data
 RuntimeDirectory=learn-python
 WorkingDirectory=/var/www/demoply.org/learn-python
 Environment=PYTHONPATH=/opt/envs/learn-python/bin
-ExecStart=/opt/envs/learn-python/bin/gunicorn -c /opt/envs/learn-python/bin/learn-python_gunicorn.py learn-python:application
+ExecStart=/opt/envs/learn-python/bin/gunicorn --workers 5 --timeout 100 learn_python_server.wsgi:application
 ExecReload=/bin/kill -s HUP $MAINPID
 KillMode=mixed
 TimeoutStopSec=5
