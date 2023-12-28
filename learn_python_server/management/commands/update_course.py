@@ -21,7 +21,7 @@ from learn_python_server.utils import TemporaryDirectory
 
 
 class Command(BaseCommand):
-    help = _(
+    help = (
         'Clone the repository for the given course(s) and update the courses based on the repo. This includes '
         'updating the modules and assignments as well as rebuilding the documentation.'
     )
@@ -40,7 +40,7 @@ class Command(BaseCommand):
                 'https://github.com/bckohan/learn-python'
             ),
             type=str,
-            help=_(
+            help=(
                 'Clone and build the docs for the current version of the course repository. '
                 'These will be served at /'
             )
@@ -51,7 +51,7 @@ class Command(BaseCommand):
             '--course',
             dest='course',
             type=str,
-            help=_(
+            help=(
                 'Clone and build the docs for the specified course. Either the name or the '
                 'ID of the course.'
             )
@@ -63,7 +63,7 @@ class Command(BaseCommand):
             dest='force',
             action='store_true',
             default=False,
-            help=_(
+            help=(
                 'Force the update even if the repository has not changed since the last update.'
             )
         )
@@ -84,19 +84,19 @@ class Command(BaseCommand):
             
             courses = Course.objects.filter(qry)
             if not courses.exists():
-                if repository and input(_('No courses found for repository {}. Would you like to create one? [y/N] ').format(repository)).strip().lower() in ['y', 'yes']:
-                    course_name = input(_('What is the name of the course? '))
+                if repository and input(('No courses found for repository {}. Would you like to create one? [y/N] ').format(repository)).strip().lower() in ['y', 'yes']:
+                    course_name = input(('What is the name of the course? '))
                     course = Course.objects.create(
                         name=course_name,
                         repository=repository
                     )
                     courses = Course.objects.filter(pk=course.pk)
                 else:
-                    raise CommandError(_('No course found matching {}').format(str(qry)))
+                    raise CommandError(('No course found matching {}').format(str(qry)))
             
             # should only ever be one! if this errors out there's something wrong with the data model
             repository = CourseRepository.objects.get(courses__in=courses)
-            self.stdout.write(_('Updating course repository {}...').format(repository.uri))
+            self.stdout.write(('Updating course repository {}...').format(repository.uri))
 
             with repository:
 
@@ -110,13 +110,13 @@ class Command(BaseCommand):
                 )
 
                 if not new_version and not options['force']:
-                    self.stdout.write(_('Repository has not changed since last update.'))
+                    self.stdout.write(('Repository has not changed since last update.'))
                     return
 
                 repository.install()
                 doc_html = repository.doc_build()
                 if not doc_html.is_dir():
-                    raise CommandError(_('Could not find built documentation in {}').format(doc_html))
+                    raise CommandError(('Could not find built documentation in {}').format(doc_html))
                 
                 course_structure = repository.course_structure()
 
@@ -144,7 +144,7 @@ class Command(BaseCommand):
                             mod_obj.number = number
                             mod_obj.save()
                         elif mod_is_new:
-                            self.stdout.write(_('Adding module {}').format(mod_obj))
+                            self.stdout.write(('Adding module {}').format(mod_obj))
                         modules.add(mod_obj.pk)
 
                         current_tasks = set()
@@ -171,15 +171,15 @@ class Command(BaseCommand):
                                     setattr(task_obj, attr, val)
                                 task_obj.save()
                             else:
-                                self.stdout.write(_('Adding assignment {}').format(task_obj))
+                                self.stdout.write(('Adding assignment {}').format(task_obj))
 
                     for removed_task in Assignment.objects.filter(module=mod_obj).exclude(pk__in=current_tasks):
-                        self.stdout.write(_('Removing assignment {}').format(removed_task))
+                        self.stdout.write(('Removing assignment {}').format(removed_task))
                         removed_task.ended = repo_version
                         removed_task.save()
 
                 for removed_module in Module.objects.filter(repository=repository).exclude(pk__in=modules):
-                    self.stdout.write(_('Removing module {}').format(removed_module))
+                    self.stdout.write(('Removing module {}').format(removed_module))
                     removed_module.ended = repo_version
                     removed_module.save()
 
@@ -191,7 +191,7 @@ class Command(BaseCommand):
 
                 # delete older doc builds for this repo
                 for old_build in DocBuild.objects.filter(repository__repository=repository).exclude(pk=doc_build.pk):
-                    self.stdout.write(_('Deleting old build {}').format(old_build))
+                    self.stdout.write(('Deleting old build {}').format(old_build))
                     if Path(old_build.path).is_dir():
                         shutil.rmtree(old_build.path)
                     old_build.delete()

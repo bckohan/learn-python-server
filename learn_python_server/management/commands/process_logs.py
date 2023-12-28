@@ -15,7 +15,7 @@ from learn_python_server.models import (
 
 
 class Command(BaseCommand):
-    help = _('Process unprocessed log files.')
+    help = ('Process unprocessed log files.')
 
     FIELD_NAMES = {
         LogEvent: [
@@ -40,7 +40,7 @@ class Command(BaseCommand):
             dest='level',
             default=LogEvent.LogLevel.ERROR,
             type=int,
-            help=_(
+            help=(
                 'The minimum log level to process. Defaults to {}.'
             ).format(LogEvent.LogLevel.ERROR)
         )
@@ -49,7 +49,7 @@ class Command(BaseCommand):
             '--reset',
             dest='reset',
             action='store_true',
-            help=_(
+            help=(
                 'Reprocess the log files.'
             )
         )
@@ -60,7 +60,7 @@ class Command(BaseCommand):
             '--repository',
             dest='repository',
             type=int,
-            help=_(
+            help=(
                 'The id of the student repository to process.'
             )
         )
@@ -78,14 +78,14 @@ class Command(BaseCommand):
             if options['reset']:
                 count = TestEvent.objects.filter(log__in=logs).delete()[1].get('learn_python_server.TestEvent', 0)
                 if count:
-                    self.stdout.write(self.style.ERROR(_('{} test events were deleted').format(count)))
+                    self.stdout.write(self.style.ERROR(('{} test events were deleted').format(count)))
                 count = LogEvent.objects.filter(log__in=logs).delete()[1].get('learn_python_server.LogEvent', 0)
                 if count:
-                    self.stdout.write(self.style.ERROR(_('{} log events were deleted').format(count)))
+                    self.stdout.write(self.style.ERROR(('{} log events were deleted').format(count)))
             for log_file in LogFile.objects.filter(qry).select_for_update():
                 events = self.process_log(log_file, options['level'])
                 self.stdout.write(
-                    self.style.SUCCESS(_('{} were processed from {}').format(events, log_file))
+                    self.style.SUCCESS(('{} were processed from {}').format(events, log_file))
                 )
                 log_file.processed = True
                 log_file.save()
@@ -123,7 +123,7 @@ class Command(BaseCommand):
                                 )
                             except Exception as e:
                                 self.stderr.write(
-                                    self.style.ERROR(_('Error processing tool run: {}').format(e))
+                                    self.style.ERROR(('Error processing tool run: {}').format(e))
                                 )
                         continue
                     if 'result' in log_record and 'identifier' in log_record:
@@ -149,8 +149,8 @@ class Command(BaseCommand):
                     )
                 except Exception as e:
 
-                    self.stderr.write(self.style.ERROR(_('Error processing log record: {}').format(e)))
-                    self.stderr.write(self.style.ERROR(_('Log record: {}').format(log_record)))
+                    self.stderr.write(self.style.ERROR(('Error processing log record: {}').format(e)))
+                    self.stderr.write(self.style.ERROR(('Log record: {}').format(log_record)))
                     continue
                 events += 1
         return events
