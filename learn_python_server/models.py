@@ -325,7 +325,7 @@ class Repository:
     @repo_guard
     def doc_build(self, *args):
         return Path(subprocess.check_output(
-            [settings.POETRY, 'run', 'doc', 'build', *(args or ['--detached'])
+            [settings.POETRY, 'run', 'doc', 'build', '--no-open', *(args or ['--detached'])
         ]).decode().strip().split('\n')[-1])
 
     @repo_guard
